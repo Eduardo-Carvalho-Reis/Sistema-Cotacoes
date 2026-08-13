@@ -1,0 +1,89 @@
+generator client {
+  provider = "prisma-client"
+  output   = "../generated/prisma"
+}
+
+datasource db {
+  provider = "mysql"
+}
+
+model Produto {
+  id           Int           @id @default(autoincrement())
+  nome         String
+  referencia   String        @unique
+  nomePopular  String?
+  unidade      String        @default("UN") // UN, KG, CX, L, etc.
+  precoAtual   Decimal?      @db.Decimal(10, 2)
+  ativo        Boolean       @default(true)
+
+  itensCotacao ItemCotacao[]
+
+  @@index([ativo])
+}
+
+
+model Fornecedor {
+  id       Int       @id @default(autoincrement())
+  nome     String
+  cnpj     String?   @unique
+  telefone String?   // usado pra montar o link do WhatsApp (wa.me)
+  ativo    Boolean   @default(true)
+
+  cotacoes Cotacao[]
+
+  @@index([ativo])
+}
+
+// Agrupa várias Cotacao 
+// pedido de compra, permitindo comparar fornecedores entre si.
+model RodadaCotacao {
+  id        Int       @id @default(autoincrement())
+  titulo    String    
+  criadoEm  DateTime  @default(now())
+
+  cotacoes  Cotacao[]
+}
+
+
+model Cotacao {
+  id           Int            @id @default(autoincrement())
+  rodadaId     Int
+  fornecedorId Int
+
+  status       StatusCotacao  @default(ABERTA)
+  dataResposta DateTime?      // quando o fornecedor respondeu com preços
+  observacao   String?
+
+  rodada       RodadaCotacao  @relation(fields: [rodadaId], references: [id])
+  fornecedor   Fornecedor     @relation(fields: [fornecedorId], references: [id])
+  itens        ItemCotacao[]
+
+  @@unique([rodadaId, fornecedorId]) 
+}
+
+
+model ItemCotacao {
+  id         Int      @id @default(autoincrement())
+  cotacaoId  Int
+  produtoId  Int
+
+  quantidade Decimal  @db.Decimal(10, 3) // decimal p/ permitir KG, L fracionados
+  preco      Decimal? @db.Decimal(10, 2) // null = ainda não respondido pelo fornecedor
+  observacao String?
+
+  cotacao    Cotacao  @relation(fields: [cotacaoId], references: [id])
+  produto    Produto  @relation(fields: [produtoId], references: [id])
+
+  @@unique([cotacaoId, produtoId])
+  @@index([produtoId])
+}
+
+enum StatusCotacao {
+  ABERTA       // criada, aguardando envio ou resposta
+  ENVIADA      // mensagem já mandada pro fornecedor
+  RESPONDIDA   // fornecedor já passou os preços
+  FINALIZADA   // cotação encerrada / decisão tomada
+  CANCELADA
+}
+
+
