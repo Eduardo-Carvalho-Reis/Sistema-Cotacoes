@@ -25,29 +25,37 @@ export class ProdutoService {
     }
 
     async excluir(id) {
-        return await prisma.produto.delete({ where: { id } });
+        return await prisma.produto.delete({ where: { id:id } });
     
     }
 
     async atualizarProduto(id, dados) {
        return await prisma.produto.update({
-            where: { id: id },
+            where: { id:id },
             data:{
              nome: dados.nome,
                 referencia: dados.referencia,
                 nomePopular: dados.nomePopular,
                 unidade: dados.unidade,
-                precoAtual: dados.precoAtual
+                precoAtual: dados.precoAtual,
+                ativo: dados.ativo
 
             }
         })
 
     }
 
-    async buscarProduto(id) {
-        const produto = await prisma.produto.findUnique({where:{id:id}});
+    // Função de busca com diferentes paremetros
+    async buscarProdutos(busca) {
+        const produtos = await prisma.produto.findMany({
+            where: busca ? {OR: [
+            {nome: { contains: busca} },
 
-        return produto;
+            {referencia: { contains: busca}}]}
+
+            : undefined
+        });     
+        return produtos;
 
     }
 
