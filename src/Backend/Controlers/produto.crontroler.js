@@ -1,4 +1,4 @@
-import { ProdutoService} from "../Services/produto.service";
+import { ProdutoService} from "../Services/produto.service.js";
 
 const produtoService = new ProdutoService();
 
