@@ -10,7 +10,7 @@ router.get('/buscar',fornecedorController.buscar);
 
 router.post('/',fornecedorController.criar)
 
-router.put('/:id',fornecedorController.atualizar);
+router.patch('/:id',fornecedorController.atualizar);
 
 router.delete('/:id',fornecedorController.deletar)
 

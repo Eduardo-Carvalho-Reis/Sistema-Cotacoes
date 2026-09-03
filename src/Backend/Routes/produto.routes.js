@@ -12,6 +12,6 @@ router.post('/',produtoController.criar);
 
 router.delete('/:id',produtoController.deletar)
 
-router.put('/:id',produtoController.atualizar)
+router.patch('/:id',produtoController.atualizar)
 
 export default router;
