@@ -13,10 +13,15 @@ router.post("/cotacoes", async (req, res) => {
     const { obraId, observacao, itens, fornecedorIds } = req.body;
     if (!Number.isInteger(obraId) || !Array.isArray(itens) || !itens.length) throw new Error("Informe uma obra e ao menos um item.");
     const cotacao = await prisma.$transaction(async tx => {
+      const produtos = await tx.produto.findMany({ where: { id: { in: [...new Set(itens.map(i => Number(i.produtoId)))] } } });
       const c = await tx.cotacaoEnvio.create({ data: { obraId, usuarioId: req.usuario.id, observacao, itens: { create: itens.map(i => {
         const quantidade = Number(i.quantidadeSolicitada);
         if (!Number.isFinite(quantidade) || quantidade <= 0) throw new Error("A quantidade solicitada deve ser maior que zero.");
-        return { produtoId: Number(i.produtoId), quantidadeSolicitada: quantidade, unidade: i.unidade, aplicacaoId: i.aplicacaoId ? Number(i.aplicacaoId) : null };
+        const produto = produtos.find(p => p.id === Number(i.produtoId));
+        if (!produto) throw new Error("Produto não encontrado.");
+        const unidade = i.unidade || produto.unidade;
+        if (unidade !== produto.unidade) throw new Error("Conversões de unidade não configuradas; use a unidade cadastrada do produto.");
+        return { produtoId: produto.id, quantidadeSolicitada: quantidade, unidade, aplicacaoId: i.aplicacaoId ? Number(i.aplicacaoId) : null };
       }) }, fornecedores: { create: [...new Set(fornecedorIds || [])].map(id => ({ fornecedorId: Number(id) })) } }, include: { itens: true, fornecedores: true } });
       await tx.historicoStatus.create({ data: { entidadeTipo: "CotacaoEnvio", entidadeId: c.id, statusNovo: c.status, usuarioId: req.usuario.id, cotacaoEnvioId: c.id } });
       return c;
@@ -72,10 +77,15 @@ router.post("/respostas", async (req, res) => {
     const { cotacaoEnvioId, fornecedorId, observacao, itens = [] } = req.body;
     const ofertas = itens.map(i => {
       const quantidade = Number(i.quantidadeOfertada ?? 0), valor = Number(i.valorUnitario ?? 0), indisponivel = Boolean(i.indisponivel);
-      if (!Number.isFinite(quantidade) || quantidade < 0 || !Number.isFinite(valor) || valor < 0 || (indisponivel && (quantidade !== 0 || valor !== 0))) throw new Error("Oferta deve ter quantidades e valores não negativos; indisponíveis devem usar zero.");
+      if (!Number.isFinite(quantidade) || quantidade < 0 || !Number.isFinite(valor) || valor < 0 || (indisponivel && (quantidade !== 0 || valor !== 0)) || (!indisponivel && quantidade === 0)) throw new Error("Oferta deve ter quantidades e valores não negativos; indisponíveis devem usar zero e ofertas disponíveis devem ter quantidade positiva.");
       if (!i.cotacaoEnvioItemId && !i.adicional) throw new Error("Itens fora da solicitação devem ser marcados como adicionais.");
       return { cotacaoEnvioItemId: i.cotacaoEnvioItemId ? Number(i.cotacaoEnvioItemId) : null, produtoId: Number(i.produtoId), quantidadeOfertada: quantidade, valorUnitario: valor, indisponivel, adicional: Boolean(i.adicional), observacao: i.observacao };
     });
+    if (ofertas.some(i => i.cotacaoEnvioItemId && i.adicional)) throw new Error("Uma oferta adicional não pode estar vinculada a um item solicitado.");
+    const solicitados = await prisma.cotacaoEnvioItem.findMany({ where: { id: { in: ofertas.map(i => i.cotacaoEnvioItemId).filter(Boolean) } }, include: { produto: true } });
+    if (solicitados.some(item => item.cotacaoEnvioId !== Number(cotacaoEnvioId))) throw new Error("Item solicitado não pertence à cotação.");
+    if (ofertas.some(i => i.cotacaoEnvioItemId && solicitados.find(item => item.id === i.cotacaoEnvioItemId)?.produtoId !== i.produtoId)) throw new Error("O produto ofertado deve corresponder ao produto solicitado.");
+    if (!await prisma.cotacaoEnvioFornecedor.findUnique({ where: { cotacaoEnvioId_fornecedorId: { cotacaoEnvioId: Number(cotacaoEnvioId), fornecedorId: Number(fornecedorId) } } })) throw new Error("O fornecedor não foi selecionado para esta cotação.");
     const resposta = await prisma.cotacaoResposta.create({ data: { cotacaoEnvioId: Number(cotacaoEnvioId), fornecedorId: Number(fornecedorId), usuarioPreenchimentoId: req.usuario.id, observacao, itens: { create: ofertas } }, include: { itens: true, fornecedor: true } });
     res.status(201).json(resposta);
   } catch (e) { fail(res, e); }
