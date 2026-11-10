@@ -81,6 +81,50 @@ router.post("/respostas", async (req, res) => {
   } catch (e) { fail(res, e); }
 });
 
+router.patch("/respostas/:id", async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const current = await prisma.cotacaoResposta.findUniqueOrThrow({ where: { id } });
+    if (current.status !== "PREENCHIMENTO") throw new Error("A resposta já foi encaminhada e não pode ser alterada.");
+    res.json(await prisma.cotacaoResposta.update({ where: { id }, data: { observacao: req.body.observacao }, include: { fornecedor: true, itens: true } }));
+  } catch (e) { fail(res, e); }
+});
+
+router.post("/respostas/:id/itens", async (req, res) => {
+  try {
+    const respostaId = Number(req.params.id), data = req.body;
+    const resposta = await prisma.cotacaoResposta.findUniqueOrThrow({ where: { id: respostaId } });
+    if (resposta.status !== "PREENCHIMENTO") throw new Error("A resposta já foi encaminhada e não pode ser alterada.");
+    const quantidade = Number(data.quantidadeOfertada ?? 0), valor = Number(data.valorUnitario ?? 0);
+    if (quantidade < 0 || valor < 0 || (data.indisponivel && (quantidade !== 0 || valor !== 0))) throw new Error("Quantidade e valor precisam ser não negativos; indisponíveis devem usar zero.");
+    if (!data.cotacaoEnvioItemId && !data.adicional) throw new Error("Itens extras devem ser identificados como adicionais.");
+    res.status(201).json(await prisma.cotacaoRespostaItem.create({ data: { cotacaoRespostaId: respostaId, cotacaoEnvioItemId: data.cotacaoEnvioItemId ? Number(data.cotacaoEnvioItemId) : null, produtoId: Number(data.produtoId), quantidadeOfertada: quantidade, valorUnitario: valor, indisponivel: Boolean(data.indisponivel), adicional: Boolean(data.adicional), observacao: data.observacao } }));
+  } catch (e) { fail(res, e); }
+});
+
+router.patch("/respostas/:respostaId/itens/:itemId", async (req, res) => {
+  try {
+    const respostaId = Number(req.params.respostaId), itemId = Number(req.params.itemId);
+    const resposta = await prisma.cotacaoResposta.findUniqueOrThrow({ where: { id: respostaId } });
+    const item = await prisma.cotacaoRespostaItem.findUniqueOrThrow({ where: { id: itemId } });
+    if (resposta.status !== "PREENCHIMENTO" || item.cotacaoRespostaId !== respostaId) throw new Error("Item não editável ou não pertence à resposta.");
+    const quantidade = Number(req.body.quantidadeOfertada ?? item.quantidadeOfertada), valor = Number(req.body.valorUnitario ?? item.valorUnitario);
+    if (quantidade < 0 || valor < 0 || (req.body.indisponivel && (quantidade !== 0 || valor !== 0))) throw new Error("Quantidade e valor precisam ser não negativos; indisponíveis devem usar zero.");
+    res.json(await prisma.cotacaoRespostaItem.update({ where: { id: itemId }, data: { ...Object.fromEntries(["cotacaoEnvioItemId", "produtoId", "quantidadeOfertada", "valorUnitario", "indisponivel", "adicional", "observacao"].filter(k => req.body[k] !== undefined).map(k => [k, ["cotacaoEnvioItemId", "produtoId"].includes(k) ? Number(req.body[k]) : req.body[k]])), quantidadeOfertada: quantidade, valorUnitario: valor } }));
+  } catch (e) { fail(res, e); }
+});
+
+router.delete("/respostas/:respostaId/itens/:itemId", async (req, res) => {
+  try {
+    const respostaId = Number(req.params.respostaId), itemId = Number(req.params.itemId);
+    const resposta = await prisma.cotacaoResposta.findUniqueOrThrow({ where: { id: respostaId } });
+    const item = await prisma.cotacaoRespostaItem.findUniqueOrThrow({ where: { id: itemId } });
+    if (resposta.status !== "PREENCHIMENTO" || item.cotacaoRespostaId !== respostaId) throw new Error("Item não removível ou não pertence à resposta.");
+    await prisma.cotacaoRespostaItem.delete({ where: { id: itemId } });
+    res.status(204).send();
+  } catch (e) { fail(res, e); }
+});
+
 router.post("/respostas/:id/encaminhar", async (req, res) => {
   try {
     const row = await prisma.cotacaoResposta.update({ where: { id: Number(req.params.id) }, data: { status: "ENCAMINHADA", dataResposta: new Date() }, include: { cotacao: true } });
@@ -141,6 +185,21 @@ router.post("/compras/:id/pedidos", permitir("ADMINISTRADOR", "ADMINISTRADOR_SIS
       return tx.pedidoCompra.findMany({ where: { compraId }, include: { fornecedor: true, itens: true } });
     });
     res.status(201).json(rows);
+  } catch (e) { fail(res, e); }
+});
+
+router.post("/compras/:id/encerrar-analise", permitir("ADMINISTRADOR", "ADMINISTRADOR_SISTEMA"), async (req, res) => {
+  try {
+    const compraId = Number(req.params.id);
+    const compra = await prisma.$transaction(async tx => {
+      const current = await tx.compra.findUniqueOrThrow({ where: { id: compraId }, include: { cotacao: true } });
+      await tx.cotacaoRespostaItem.updateMany({ where: { resposta: { cotacaoEnvioId: current.cotacaoEnvioId }, status: "PENDENTE" }, data: { status: "ENCERRADA" } });
+      await tx.cotacaoResposta.updateMany({ where: { cotacaoEnvioId: current.cotacaoEnvioId, status: { in: ["PREENCHIMENTO", "ENCAMINHADA"] } }, data: { status: "ENCERRADA" } });
+      const cotacao = await tx.cotacaoEnvio.update({ where: { id: current.cotacaoEnvioId }, data: { status: "ENCERRADA" } });
+      await tx.historicoStatus.create({ data: { entidadeTipo: "CotacaoEnvio", entidadeId: cotacao.id, statusAnterior: current.cotacao.status, statusNovo: cotacao.status, usuarioId: req.usuario.id, cotacaoEnvioId: cotacao.id } });
+      return cotacao;
+    });
+    res.json(compra);
   } catch (e) { fail(res, e); }
 });
 

@@ -18,7 +18,8 @@ API em Node.js, Express, Prisma e PostgreSQL para cadastro operacional, cotaçõ
 - `/produto` e `/fornecedor`: cadastro, busca e atualização de produtos e fornecedores.
 - `/api/cotacoes`: cotação de envio com obra, itens e fornecedores; `/:id/comparativo` compara respostas e `/:id/enviar` envia mensagens individuais.
 - `/api/respostas`: respostas e ofertas; `/:id/encaminhar` finaliza preenchimento.
-- `/api/compras/aprovar`: aprova/rejeita ofertas e quantidades; `/api/compras/:id/pedidos` agrupa as aprovações por fornecedor.
+- `/api/respostas/:id/itens`: inclui, edita e remove itens enquanto a resposta está em preenchimento.
+- `/api/compras/aprovar`: aprova/rejeita ofertas e quantidades; `/api/compras/:id/pedidos` agrupa as aprovações por fornecedor e `/:id/encerrar-analise` encerra ofertas pendentes.
 - `/api/pedidos`: confirmação, notas fiscais e recebimentos parciais por item.
 - `/api/relatorios/gastos`: filtros `obraId`, `de`, `ate`, `agruparPor` (obra, fornecedor ou produto) e `formato=csv|pdf`.
 - `/api/historico`: consulta trilha de alterações.
