@@ -25,3 +25,7 @@ API em Node.js, Express, Prisma e PostgreSQL para cadastro operacional, cotaçõ
 - `/api/historico`: consulta trilha de alterações.
 
 O envio de WhatsApp é independente do provedor. Configure `WHATSAPP_PROVIDER_URL` para um endpoint que aceite `POST` JSON com `telefone` e `mensagem`, além do cabeçalho `Idempotency-Key`; a resposta pode conter `id` ou `messageId`. Falhas por destinatário são registradas sem interromper os demais envios.
+
+## Interface React
+
+A interface Vite fica em `Frontend/`. Em um terminal, inicie a API com `npm run dev` na raiz. Em outro, execute `npm install --prefix Frontend` e `npm run dev --prefix Frontend`. Abra `http://localhost:5173`. O Vite encaminha as chamadas da interface para a API local na porta 3000. Para gerar os arquivos de produção, use `npm run build --prefix Frontend`.
