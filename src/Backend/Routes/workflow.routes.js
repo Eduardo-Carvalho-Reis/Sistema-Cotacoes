@@ -272,6 +272,24 @@ router.get("/relatorios/gastos", async (req, res) => {
   } catch (e) { fail(res, e); }
 });
 
+router.get("/relatorios/cotacoes", async (req, res) => {
+  try {
+    const cotacoes = await prisma.cotacaoEnvio.findMany({ where: { obraId: req.query.obraId ? Number(req.query.obraId) : undefined, dataCriacao: req.query.de || req.query.ate ? { gte: req.query.de ? new Date(req.query.de) : undefined, lte: req.query.ate ? new Date(req.query.ate) : undefined } : undefined, itens: req.query.produtoId ? { some: { produtoId: Number(req.query.produtoId) } } : undefined }, include: { obra: true, itens: { include: { produto: true, ofertas: { include: { resposta: { include: { fornecedor: true } } } } } }, respostas: { include: { itens: true } } }, orderBy: { dataCriacao: "desc" }, take: Math.min(Number(req.query.limite) || 500, 1000) });
+    const rows = cotacoes.flatMap(c => c.itens.flatMap(i => i.ofertas.map(o => ({ cotacaoId: c.id, obra: c.obra.nome, produto: i.produto.nome, unidade: i.unidade, solicitada: Number(i.quantidadeSolicitada), fornecedor: o.resposta.fornecedor.nome, ofertada: Number(o.quantidadeOfertada), valorUnitario: Number(o.valorUnitario), total: Number(o.quantidadeOfertada) * Number(o.valorUnitario), disponibilidade: o.indisponivel ? "indisponivel" : "disponivel" }))));
+    if (req.query.formato === "csv") {
+      const csv = ["cotacaoId,obra,produto,unidade,solicitada,fornecedor,ofertada,valorUnitario,total,disponibilidade", ...rows.map(x => Object.values(x).map(v => `"${String(v).replaceAll('"','""')}"`).join(","))].join("\r\n");
+      res.setHeader("Content-Type", "text/csv; charset=utf-8"); res.setHeader("Content-Disposition", "attachment; filename=relatorio-cotacoes.csv"); return res.send(`\ufeff${csv}`);
+    }
+    if (req.query.formato === "pdf") {
+      res.setHeader("Content-Type", "application/pdf"); res.setHeader("Content-Disposition", "attachment; filename=relatorio-cotacoes.pdf");
+      const pdf = new PDFDocument({ margin: 40, size: "A4", layout: "landscape" }); pdf.pipe(res); pdf.fontSize(18).text("Comparativo de cotações", { align: "center" }); pdf.moveDown().fontSize(9).text(`Filtros: obra=${req.query.obraId || "todas"}; produto=${req.query.produtoId || "todos"}; período=${req.query.de || "início"} até ${req.query.ate || "hoje"}`); pdf.moveDown().fontSize(10).text("Cotação | Obra | Produto | Fornecedor | Qtd. solicitada | Qtd. ofertada | Unitário | Total | Situação");
+      for (const x of rows) { if (pdf.y > 520) pdf.addPage(); pdf.fontSize(8).text(`${x.cotacaoId} | ${x.obra} | ${x.produto} | ${x.fornecedor} | ${x.solicitada} ${x.unidade} | ${x.ofertada} | R$ ${x.valorUnitario.toFixed(2)} | R$ ${x.total.toFixed(2)} | ${x.disponibilidade}`); }
+      pdf.end(); return;
+    }
+    res.json({ filtros: req.query, linhas: rows });
+  } catch (e) { fail(res, e); }
+});
+
 router.get("/historico", async (req, res) => {
   try { res.json(await prisma.historicoStatus.findMany({ where: { entidadeTipo: req.query.tipo, entidadeId: req.query.id ? Number(req.query.id) : undefined }, include: { usuario: { select: { id: true, nome: true } } }, orderBy: { dataHora: "desc" }, take: Math.min(Number(req.query.limite) || 100, 500) })); }
   catch (e) { fail(res, e); }

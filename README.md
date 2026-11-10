@@ -21,7 +21,7 @@ API em Node.js, Express, Prisma e PostgreSQL para cadastro operacional, cotaçõ
 - `/api/respostas/:id/itens`: inclui, edita e remove itens enquanto a resposta está em preenchimento.
 - `/api/compras/aprovar`: aprova/rejeita ofertas e quantidades; `/api/compras/:id/pedidos` agrupa as aprovações por fornecedor e `/:id/encerrar-analise` encerra ofertas pendentes.
 - `/api/pedidos`: confirmação, notas fiscais e recebimentos parciais por item.
-- `/api/relatorios/gastos`: filtros `obraId`, `de`, `ate`, `agruparPor` (obra, fornecedor ou produto) e `formato=csv|pdf`.
+- `/api/relatorios/gastos`: filtros `obraId`, `de`, `ate`, `agruparPor` (obra, fornecedor ou produto) e `formato=csv|pdf`; `/api/relatorios/cotacoes` exporta comparativos com os mesmos formatos.
 - `/api/historico`: consulta trilha de alterações.
 
 O envio de WhatsApp é independente do provedor. Configure `WHATSAPP_PROVIDER_URL` para um endpoint que aceite `POST` JSON com `telefone` e `mensagem`, além do cabeçalho `Idempotency-Key`; a resposta pode conter `id` ou `messageId`. Falhas por destinatário são registradas sem interromper os demais envios.
