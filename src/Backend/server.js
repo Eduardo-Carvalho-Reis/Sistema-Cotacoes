@@ -8,8 +8,9 @@ async function iniciarServico(){
     await prisma.$queryRaw`SELECT 1`;
     console.log("Banco de dados conectado!");
 
-    server.listen(3000,()=>{
-    console.log("sevidor ouvindo")})
+    const port = Number(process.env.PORT) || 3000;
+    server.listen(port,()=>{
+    console.log(`Servidor ouvindo na porta ${port}`)})
 
     }catch(erro) {
         console.error("Erro ao conectar ao banco:", erro);
