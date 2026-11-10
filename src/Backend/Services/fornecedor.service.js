@@ -9,6 +9,8 @@ export class FornecedorService {
                 nome: dados.nome,
                 cnpj: dados.cnpj,
                 telefone: dados.telefone,
+                endereco: dados.endereco,
+                email: dados.email,
                 ativo: dados.ativo
             }
         });
@@ -16,18 +18,14 @@ export class FornecedorService {
 
 
     async listar() {
-        const fornecedores = await prisma.fornecedor.findMany();
+        const fornecedores = await prisma.fornecedor.findMany({ where: { ativo: true } });
 
         return fornecedores;
     }
 
 
     async excluir(id) {
-        return await prisma.fornecedor.delete({
-            where: {
-                id: id
-            }
-        });
+        return await prisma.fornecedor.update({ where: { id }, data: { ativo: false } });
     }
 
 
@@ -40,6 +38,8 @@ export class FornecedorService {
                 nome: dados.nome,
                 cnpj: dados.cnpj,
                 telefone: dados.telefone,
+                endereco: dados.endereco,
+                email: dados.email,
                 ativo: dados.ativo
             }
         });
@@ -51,13 +51,14 @@ export class FornecedorService {
         const fornecedores = await prisma.fornecedor.findMany({
             where: busca
                 ? {
+                    ativo: true,
                     OR: [
                         {nome: {contains: busca}},
                         {
                         cnpj: {contains: busca}
                         },
                         {telefone: {contains: busca}}]}
-                : undefined
+                : { ativo: true }
         });
 
         return fornecedores;

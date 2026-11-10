@@ -4,6 +4,7 @@ import { prisma } from "../prisma/lib/prisma";
 export class ProdutoService {
 
     async criarProduto(dados) {
+        if (dados.precoAtual != null && Number(dados.precoAtual) < 0) throw new Error("Preço não pode ser negativo.");
         return await prisma.produto.create({
             data: {
                 nome: dados.nome,
@@ -19,17 +20,18 @@ export class ProdutoService {
     }
 
     async listar() {
-        const produtos = await prisma.produto.findMany();
+        const produtos = await prisma.produto.findMany({ where: { ativo: true } });
         return produtos;
 
     }
 
     async excluir(id) {
-        return await prisma.produto.delete({ where: { id:id } });
+        return await prisma.produto.update({ where: { id }, data: { ativo: false } });
     
     }
 
     async atualizarProduto(id, dados) {
+       if (dados.precoAtual != null && Number(dados.precoAtual) < 0) throw new Error("Preço não pode ser negativo.");
        return await prisma.produto.update({
             where: { id:id },
             data:{
@@ -48,12 +50,13 @@ export class ProdutoService {
     // Função de busca com diferentes paremetros
     async buscarProdutos(busca) {
         const produtos = await prisma.produto.findMany({
-            where: busca ? {OR: [
-            {nome: { contains: busca} },
-
-            {referencia: { contains: busca}}]}
-
-            : undefined
+            where: {
+                ativo: true,
+                ...(busca ? { OR: [
+                    { nome: { contains: busca } },
+                    { referencia: { contains: busca } }
+                ] } : {})
+            }
         });     
         return produtos;
 

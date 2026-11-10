@@ -5,9 +5,10 @@
   "main": "server.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "dev" : "tsx watch src/Backend/server.js",
-    "start": "tsx src/Backend/server.js"
-    
+    "dev": "tsx watch src/Backend/server.js",
+    "start": "tsx src/Backend/server.js",
+    "db:generate": "prisma generate --schema src/Backend/prisma/schema.prisma",
+    "db:migrate": "prisma migrate deploy --schema src/Backend/prisma/schema.prisma"
   },
   "repository": {
     "type": "git",
@@ -22,10 +23,14 @@
   },
   "homepage": "https://github.com/Eduardo-Carvalho-Reis/Sistema-Cotacoes#readme",
   "dependencies": {
-    "@prisma/adapter-mariadb": "^7.9.1",
+    "@prisma/adapter-pg": "7.9.1",
     "@prisma/client": "^7.9.1",
+    "bcryptjs": "^3.0.3",
     "dotenv": "^17.4.2",
-    "express": "^5.2.1"
+    "express": "^5.2.1",
+    "jsonwebtoken": "^9.0.3",
+    "pdfkit": "^0.20.2",
+    "pg": "^8.23.1"
   },
   "devDependencies": {
     "@types/node": "^26.2.0",
