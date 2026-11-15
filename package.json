@@ -5,7 +5,9 @@
   "main": "server.js",
   "scripts": {
     "test": "echo \"Error: no test specified\" && exit 1",
-    "dev": "tsx watch src/Backend/server.js",
+    "dev": "concurrently -k -n BACKEND,FRONTEND \"npm run dev:backend\" \"npm run dev:frontend\"",
+    "dev:backend": "tsx watch src/Backend/server.js",
+    "dev:frontend": "npm run dev --prefix src/Frontend",
     "start": "tsx src/Backend/server.js",
     "db:generate": "prisma generate --schema src/Backend/prisma/schema.prisma",
     "db:migrate": "prisma migrate deploy --schema src/Backend/prisma/schema.prisma"
@@ -34,6 +36,7 @@
   },
   "devDependencies": {
     "@types/node": "^26.2.0",
+    "concurrently": "^10.0.7",
     "prisma": "^7.9.1",
     "tsx": "^4.23.12",
     "typescript": "^7.0.2"

@@ -7,7 +7,7 @@ API em Node.js, Express, Prisma e PostgreSQL para cadastro operacional, cotaçõ
 1. Instale PostgreSQL e crie o banco `sistema_cotacoes`.
 2. Copie `.env.example` para `.env` e configure `DATABASE_URL` e `JWT_SECRET`.
 3. Execute `npm install`, `npm run db:generate` e `npm run db:migrate`.
-4. Inicie a API com `npm run dev` (ou `npm start`). A porta padrão é 3000.
+4. Inicie o projeto com `npm run dev`. Esse comando sobe a API e a interface Vite juntos. A API usa a porta 3000 e a interface usa a porta 5173.
 5. Crie o primeiro usuário de sistema com `POST /auth/bootstrap` usando `nome`, `email` e `senha` (mínimo 10 caracteres). O bootstrap só funciona enquanto não houver usuários.
 
 ## API
@@ -24,8 +24,15 @@ API em Node.js, Express, Prisma e PostgreSQL para cadastro operacional, cotaçõ
 - `/api/relatorios/gastos`: filtros `obraId`, `de`, `ate`, `agruparPor` (obra, fornecedor ou produto) e `formato=csv|pdf`; `/api/relatorios/cotacoes` exporta comparativos com os mesmos formatos.
 - `/api/historico`: consulta trilha de alterações.
 
-O envio de WhatsApp é independente do provedor. Configure `WHATSAPP_PROVIDER_URL` para um endpoint que aceite `POST` JSON com `telefone` e `mensagem`, além do cabeçalho `Idempotency-Key`; a resposta pode conter `id` ou `messageId`. Falhas por destinatário são registradas sem interromper os demais envios.
+### Integracao com WPPConnect Server
+
+1. Suba o WPPConnect Server e configure nele uma `SECRET_KEY` forte. O Swagger fica disponivel em `/api-docs` na instancia.
+2. Gere um token para a sessao com `POST http://localhost:21465/api/minha-sessao/<SECRET_KEY>/generate-token` e guarde o campo `full` da resposta.
+3. Inicie a sessao com `POST http://localhost:21465/api/minha-sessao/start-session`, usando `Authorization: Bearer <TOKEN_FULL>`. Obtenha o QR Code e escaneie-o pelo WhatsApp do numero remetente.
+4. No `.env` da raiz, configure `WHATSAPP_PROVIDER_URL=http://localhost:21465/api/minha-sessao/send-message` e `WHATSAPP_PROVIDER_TOKEN=<TOKEN_FULL>`. Troque `minha-sessao` pelo nome real e reinicie a API.
+
+O backend envia JSON com `phone` e `message`; telefones devem incluir codigo do pais e DDD, por exemplo `5511999999999`. Consulte a [documentacao oficial da API](https://wppconnect.io/swagger/wppconnect-server/) para detalhes. Falhas por destinatario sao registradas sem interromper os demais envios.
 
 ## Interface React
 
-A interface Vite fica em `Frontend/`. Em um terminal, inicie a API com `npm run dev` na raiz. Em outro, execute `npm install --prefix Frontend` e `npm run dev --prefix Frontend`. Abra `http://localhost:5173`. O Vite encaminha as chamadas da interface para a API local na porta 3000. Para gerar os arquivos de produção, use `npm run build --prefix Frontend`.
+A interface Vite fica em `src/Frontend/`. Depois de instalar as dependências da raiz e da interface (`npm install` e `npm install --prefix src/Frontend`), use `npm run dev` na raiz para iniciar API e interface juntas. Abra `http://localhost:5173`. O Vite encaminha as chamadas da interface para a API local na porta 3000. Para gerar os arquivos de produção, use `npm run build --prefix src/Frontend`.
