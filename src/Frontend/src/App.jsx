@@ -96,7 +96,7 @@ function App() {
     {notice && <div className="toast"><CheckCircle2 size={17}/>{notice}</div>}
     {modal?.type === 'newQuote' && <QuoteWizard {...contentProps} onClose={() => setModal(null)} />}
     {modal?.type === 'respond' && <ResponseModal {...contentProps} quote={modal.quote} onClose={() => setModal(null)} />}
-    {modal?.type === 'purchaseAction' && <PurchaseModal {...contentProps} purchase={modal.purchase} action={modal.action} onClose={() => setModal(null)} />}
+    {modal?.type === 'purchaseAction' && <PurchaseModal {...contentProps} purchase={modal.purchase} order={modal.order} action={modal.action} onClose={() => setModal(null)} />}
   </div>;
 }
 

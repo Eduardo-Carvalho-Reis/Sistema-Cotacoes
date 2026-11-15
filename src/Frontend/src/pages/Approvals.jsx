@@ -19,7 +19,19 @@ function Approvals({ data, api, refresh, notify, go, user }) {
     if (!quote || !offers.length) return notify('Selecione uma cotação com ofertas recebidas.');
     if (offers.some(o => !o.indisponivel && !decisions[o.id]?.status)) return notify('Defina uma decisão para cada oferta disponível.');
     const body = { cotacaoEnvioId: quote.id, itens: offers.map(o => { const status = o.indisponivel ? 'REJEITADA' : decisions[o.id].status; return { ofertaId: o.id, status, quantidadeAprovada: status === 'REJEITADA' ? 0 : Number(decisions[o.id].quantidade ?? o.quantidadeOfertada), valorUnitarioAprovado: Number(decisions[o.id]?.valor ?? o.valorUnitario) }; }) };
-    setBusy(true); try { await api('/api/compras/aprovar', { method: 'POST', body: JSON.stringify(body) }); await refresh(); notify('Decisão registrada e compra consolidada.'); go('purchases'); } catch (e) { notify(e.message); } finally { setBusy(false); }
+    setBusy(true); try {
+      const result = await api('/api/compras/aprovar', { method: 'POST', body: JSON.stringify(body) });
+      const notificacoes = result.notificacoes || [];
+      const falhas = notificacoes.filter(item => item.status === 'FALHOU');
+      await refresh();
+      const mensagem = notificacoes.length
+        ? falhas.length
+          ? 'Decisão registrada. ' + (notificacoes.length - falhas.length) + ' fornecedor(es) notificado(s); ' + falhas.length + ' falha(s): ' + falhas[0].erro
+          : 'Decisão registrada. ' + notificacoes.length + ' fornecedor(es) notificado(s).'
+        : 'Decisão registrada. Nenhum fornecedor recebeu itens aprovados para notificação.';
+      notify(mensagem);
+      go('purchases');
+    } catch (e) { notify(e.message); } finally { setBusy(false); }
   };
   return <>
     <PageTitle eyebrow="ANÁLISE ADMINISTRATIVA" title="Aprovações" description="Compare as propostas recebidas e defina quais itens serão comprados." />

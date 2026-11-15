@@ -55,10 +55,36 @@ router.get("/compras", async (req, res) => {
 router.post("/cotacoes/:id/enviar", async (req, res) => {
   try {
     const id = Number(req.params.id);
-    const c = await prisma.cotacaoEnvio.findUnique({ where: { id }, include: { obra: true, itens: { include: { produto: true } }, fornecedores: { include: { fornecedor: true } } } });
+    const c = await prisma.cotacaoEnvio.findUnique({ where: { id }, include: { obra: true, itens: { include: { produto: true, aplicacao: true } }, fornecedores: { include: { fornecedor: true } } } });
     if (!c || !c.fornecedores.length) throw new Error("Cotação não encontrada ou sem fornecedores.");
     const resultados = await Promise.all(c.fornecedores.map(async p => {
-      const mensagem = [`Solicitação ${c.id} - ${c.obra.nome}`, ...c.itens.map(i => `• ${i.produto.nome}: ${i.quantidadeSolicitada} ${i.unidade}`)].join("\n");
+      const aplicacoes = [...new Set(c.itens.map(item => item.aplicacao?.nome).filter(Boolean))];
+      const descricaoAplicacoes = aplicacoes.length ? aplicacoes.join(", ") : "Todas as aplica\u00e7\u00f5es";
+      const dataSolicitacao = new Intl.DateTimeFormat("pt-BR", { timeZone: "America/Sao_Paulo" }).format(c.dataCriacao);
+      const mensagem = [
+        "Ol\u00e1!",
+        "",
+        "*Nova solicita\u00e7\u00e3o de cota\u00e7\u00e3o*",
+        "",
+        "Informamos que h\u00e1 uma nova solicita\u00e7\u00e3o de cota\u00e7\u00e3o dispon\u00edvel.",
+        "",
+        "*Cota\u00e7\u00e3o n\u00ba:* " + c.id,
+        "*Data da solicita\u00e7\u00e3o:* " + dataSolicitacao,
+        "*Obra:* " + c.obra.nome,
+        "",
+        "*Produtos solicitados:*",
+        ...c.itens.map(item => "* " + item.produto.nome + ": " + item.quantidadeSolicitada + " " + item.unidade),
+        "",
+        "*Aplica\u00e7\u00f5es:*",
+        descricaoAplicacoes,
+        "",
+        "*Observa\u00e7\u00f5es:*",
+        c.observacao || "Nenhuma.",
+        "",
+        "Por gentileza, priorize o envio da proposta por escrito ou em formato PDF.",
+        "",
+        "Aguardamos seu retorno!",
+      ].join("\n");
       let status = "ENVIADO", erro = null, identificadorExterno = null;
       try { ({ identificadorExterno } = await whatsapp.enviar({ telefone: p.fornecedor.telefone, mensagem, idempotencia: `cotacao-${c.id}-fornecedor-${p.fornecedorId}` })); }
       catch (e) { status = "FALHOU"; erro = e.message; }
@@ -146,6 +172,7 @@ router.post("/respostas/:id/encaminhar", async (req, res) => {
 router.post("/compras/aprovar", permitir("ADMINISTRADOR", "ADMINISTRADOR_SISTEMA"), async (req, res) => {
   try {
     const { cotacaoEnvioId, itens } = req.body;
+    const usuario = await prisma.usuario.findUnique({ where: { id: req.usuario.id }, select: { nome: true, email: true } });
     if (!Array.isArray(itens) || !itens.length) throw new Error("Informe itens para decisão.");
     const compra = await prisma.$transaction(async tx => {
       const cotacao = await tx.cotacaoEnvio.findUniqueOrThrow({ where: { id: Number(cotacaoEnvioId) }, include: { itens: true } });
@@ -174,9 +201,53 @@ router.post("/compras/aprovar", permitir("ADMINISTRADOR", "ADMINISTRADOR_SISTEMA
         await tx.cotacaoRespostaItem.update({ where: { id: oferta.id }, data: { status: "APROVADA" } });
       }
       await tx.historicoStatus.create({ data: { entidadeTipo: "Compra", entidadeId: c.id, statusNovo: c.status, usuarioId: req.usuario.id, compraId: c.id, cotacaoEnvioId: cotacao.id } });
-      return tx.compra.findUnique({ where: { id: c.id }, include: { selecoes: { include: { oferta: { include: { resposta: { include: { fornecedor: true } }, produto: true } }, aprovador: { select: { nome: true } } } } } });
+      return tx.compra.findUnique({ where: { id: c.id }, include: { obra: true, cotacao: true, selecoes: { include: { oferta: { include: { resposta: { include: { fornecedor: true } }, produto: true, itemSolicitado: { include: { aplicacao: true } } } }, aprovador: { select: { nome: true } } } } } });
     }, { isolationLevel: "Serializable" });
-    res.status(201).json(compra);
+    const ofertasAprovadasAgora = new Set(itens.filter(item => item.status !== "REJEITADA").map(item => Number(item.ofertaId)));
+    const aprovados = compra.selecoes.filter(selecao => selecao.status === "APROVADA" && ofertasAprovadasAgora.has(selecao.cotacaoRespostaItemId));
+    const grupos = Map.groupBy(aprovados, selecao => selecao.oferta.resposta.fornecedorId);
+    const dataFechamento = new Intl.DateTimeFormat("pt-BR", { timeZone: "America/Sao_Paulo" }).format(new Date());
+    const notificacoes = await Promise.all([...grupos.values()].map(async selecoes => {
+      const fornecedor = selecoes[0].oferta.resposta.fornecedor;
+      const aplicacoes = [...new Set(selecoes.map(selecao => selecao.oferta.itemSolicitado?.aplicacao?.nome).filter(Boolean))];
+      const linhasAplicacoes = aplicacoes.length ? aplicacoes.map(nome => `* ${nome}`) : ["*Todas as aplicações"];
+      const linhasProdutos = selecoes.map(selecao => `* ${selecao.oferta.produto.nome}: ${selecao.quantidadeAprovada} ${selecao.oferta.produto.unidade}`);
+      const mensagem = [
+        "Olá!",
+        "",
+        "*Faturamento autorizado!*",
+        "",
+        "Informamos que o pedido foi fechado com sucesso.",
+        "",
+        `*Data do fechamento:* ${dataFechamento}`,
+        "",
+        "*Produtos:*",
+        ...linhasProdutos,
+        "",
+        "*Observações:*",
+        compra.cotacao.observacao || "Nenhuma.",
+        "",
+        "Por gentileza, solicite à equipe responsável que inclua as seguintes informações no *rodapé da nota fiscal*: ",
+        "",
+        `*Obra:* ${compra.obra.nome}`,
+        `*Aplicações:* ${aplicacoes.length ? aplicacoes.join(", ") : "Todas as aplicações"}`,
+        "",
+        "Atenciosamente,",
+        usuario?.nome || "Equipe de compras",
+        "Construtora Gil Ferreira LTDA",
+        usuario?.email || "",
+        "",
+        "Agradecemos pela parceria!",
+      ].join("\n");
+
+      try {
+        const { identificadorExterno } = await whatsapp.enviar({ telefone: fornecedor.telefone, mensagem });
+        return { fornecedorId: fornecedor.id, status: "ENVIADO", identificadorExterno };
+      } catch (erro) {
+        return { fornecedorId: fornecedor.id, status: "FALHOU", erro: erro.message };
+      }
+    }));
+    res.status(201).json({ compra, notificacoes });
   } catch (e) { fail(res, e); }
 });
 

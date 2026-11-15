@@ -22,7 +22,7 @@ function PurchaseModal({ purchase, order, action, api, refresh, notify, onClose 
   const [busy, setBusy] = useState(false); const [itemId, setItemId] = useState(String(order?.itens?.[0]?.id || ''));
   const [form, setForm] = useState({ numero: '', dataEmissao: new Date().toISOString().slice(0,10), valorTotal: '', arquivoReferencia: '', quantidadeRecebida: '', observacao: '' });
   const title = action === 'confirm' ? 'Confirmar pedido' : action === 'invoice' ? 'Registrar nota fiscal' : 'Registrar recebimento';
-  const submit = async (e) => { e.preventDefault(); setBusy(true); try {
+  const submit = async (e) => { e.preventDefault(); if (!order?.id) { notify('Pedido não encontrado. Feche a janela e tente novamente.'); return; } setBusy(true); try {
     if (action === 'confirm') await api(`/api/pedidos/${order.id}/confirmar`, { method: 'PATCH', body: JSON.stringify({}) });
     if (action === 'invoice') await api(`/api/pedidos/${order.id}/notas-fiscais`, { method: 'POST', body: JSON.stringify({ numero: form.numero, dataEmissao: form.dataEmissao, valorTotal: Number(form.valorTotal), arquivoReferencia: form.arquivoReferencia || undefined }) });
     if (action === 'receive') await api(`/api/pedidos/itens/${itemId}/recebimentos`, { method: 'POST', body: JSON.stringify({ quantidadeRecebida: Number(form.quantidadeRecebida), observacao: form.observacao }) });
