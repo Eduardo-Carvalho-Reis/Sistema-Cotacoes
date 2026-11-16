@@ -1,15 +1,18 @@
 .response-quote-list{padding:0 20px 10px}
 .response-quote-group{border-top:1px solid #edf0ec}
 .response-quote-heading{width:100%;min-height:72px;display:flex;align-items:center;gap:12px;padding:12px 2px;border:0;background:transparent;text-align:left;cursor:pointer}
-.response-quote-heading:hover .response-quote-title b{color:#315d3e}
-.response-quote-icon{width:36px;height:36px;display:grid;place-items:center;flex:0 0 36px;border-radius:9px;background:#edf4ed;color:#4d8058}
+.response-quote-heading:hover .response-quote-title b{color:#31435D}
+.response-quote-icon{width:36px;height:36px;display:grid;place-items:center;flex:0 0 36px;border-radius:9px;background:#edf3fb;color:#4D6280}
 .response-quote-title{flex:1;min-width:140px}
-.response-quote-title b{display:block;color:#344137;font-size:11px}
+.response-quote-title b{display:block;color:#343941;font-size:11px}
 .response-quote-title span{display:block;margin-top:5px;color:#929c93;font-size:9px}
-.response-quote-counts{display:flex;flex-direction:column;align-items:flex-end;gap:4px;margin-right:5px;color:#66746a;font-size:9px}
+.response-quote-counts{display:flex;flex-direction:column;align-items:flex-end;gap:4px;margin-right:5px;color:#666C74;font-size:9px}
 .response-quote-counts small{color:#9aa39b;font-size:8px}
 .response-quote-chevron{flex:0 0 auto;color:#758278;transition:transform .18s ease}
 .response-quote-chevron.expanded{transform:rotate(90deg)}
 .response-quote-suppliers{padding:0 0 8px 48px}
 .response-quote-suppliers .response-card:first-child{border-top:1px solid #f0f2ef}
 @media(max-width:780px){.response-quote-list{padding:0 13px 10px}.response-quote-heading{gap:8px;min-height:66px}.response-quote-counts{font-size:8px}.response-quote-suppliers{padding-left:12px}}
+
+.response-quote-heading:hover .response-quote-title b{color:rgb(43, 189, 251)}
+.response-quote-icon{background:#eaf7fd;color:rgb(43, 189, 251)}

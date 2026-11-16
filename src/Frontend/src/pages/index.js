@@ -6,3 +6,4 @@ export { Purchases, PurchaseModal } from './Purchases.jsx';
 export { Catalog, CatalogForm } from './Catalog.jsx';
 export { Reports } from './Reports.jsx';
 export { Login } from './Login.jsx';
+export { Settings } from './Settings.jsx';

@@ -7,7 +7,7 @@ import {
   Users, WalletCards, X,
 } from 'lucide-react';
 
-import { Login, Overview, Quotes, Responses, Approvals, Purchases, Catalog, Reports, QuoteWizard, ResponseModal, PurchaseModal } from './pages/index.js';
+import { Login, Overview, Quotes, Responses, Approvals, Purchases, Catalog, Reports, Settings, QuoteWizard, ResponseModal, PurchaseModal } from './pages/index.js';
 import { statusNames } from './utils/formatters.js';
 
 
@@ -73,11 +73,9 @@ function App() {
   const contentProps = { api, data, refresh, go, notify, perform, setModal };
 
   return <div className="app-shell">
-    <aside className={`sidebar ${mobileNav ? 'sidebar-open' : ''}`}>
-      <div className="brand"><div className="brand-mark"><span></span><span></span><span></span></div><div><b>orbe</b><small>COMPRAS & COTAÇÕES</small></div><button className="icon-button mobile-close" onClick={() => setMobileNav(false)}><X size={18}/></button></div>
-      <div className="workspace-switch"><div className="workspace-avatar">OB</div><div><b>Obras Brasil</b><small>Workspace principal</small></div><ChevronDown size={15}/></div>
+    <aside className={`sidebar ${mobileNav ? 'sidebar-open' : ''}`}><button className="icon-button mobile-close sidebar-mobile-close" onClick={() => setMobileNav(false)} aria-label="Fechar menu"><X size={18}/></button>
       <nav>{nav.map(group => <div className="nav-group" key={group.title}><span className="nav-caption">{group.title}</span>{group.items.map(item => <button key={item.id} className={`nav-link ${page === item.id ? 'active' : ''}`} onClick={() => go(item.id)}><item.icon size={18}/><span>{item.label}</span>{item.count > 0 && <em>{item.count}</em>}</button>)}</div>)}</nav>
-      <div className="sidebar-bottom"><button className="nav-link" onClick={() => go('catalog')}><Settings2 size={18}/><span>Configurações</span></button><div className="help-card"><div className="help-icon"><CircleHelp size={17}/></div><b>Precisa de ajuda?</b><p>Veja como funciona o fluxo de compras.</p><button onClick={() => notify('O fluxo começa criando uma cotação e selecionando uma obra.')}>Acessar central <ArrowRight size={14}/></button></div><div className="profile"><div className="avatar">{user.nome?.slice(0, 1).toUpperCase()}</div><div className="profile-info"><b>{user.nome}</b><small>{(typeof user.perfil === 'string' ? user.perfil : user.perfil?.nome || '').replaceAll('_', ' ')}</small></div><button className="icon-button" title="Sair" onClick={signOut}><LogOut size={16}/></button></div></div>
+      <div className="sidebar-bottom"><button className={`nav-link ${page === 'settings' ? 'active' : ''}`} onClick={() => go('settings')}><Settings2 size={18}/><span>Configurações</span></button><div className="help-card"><div className="help-icon"><CircleHelp size={17}/></div><b>Precisa de ajuda?</b><p>Veja como funciona o fluxo de compras.</p><button onClick={() => notify('O fluxo começa criando uma cotação e selecionando uma obra.')}>Acessar central <ArrowRight size={14}/></button></div><div className="profile"><div className="avatar">{user.nome?.slice(0, 1).toUpperCase()}</div><div className="profile-info"><b>{user.nome}</b><small>{(typeof user.perfil === 'string' ? user.perfil : user.perfil?.nome || '').replaceAll('_', ' ')}</small></div><button className="icon-button" title="Sair" onClick={signOut}><LogOut size={16}/></button></div></div>
     </aside>
     <main className="main-area">
       <header className="topbar"><div className="topbar-left"><button className="icon-button mobile-menu" onClick={() => setMobileNav(true)}><Menu size={19}/></button><div className="breadcrumbs"><span>Workspace</span><ChevronRight size={14}/><b>{activeLabel}</b></div></div><div className="topbar-right"><div className="search-shortcut"><Search size={15}/><span>Buscar</span><kbd>⌘ K</kbd></div><button className="icon-button notification" onClick={() => notify('Você está em dia. Nenhuma notificação nova.')}><Bell size={18}/><i></i></button><div className="topbar-divider"></div><div className="top-user"><div className="avatar small-avatar">{user.nome?.slice(0, 1).toUpperCase()}</div><ChevronDown size={14}/></div></div></header>
@@ -89,6 +87,7 @@ function App() {
         {page === 'purchases' && <Purchases {...contentProps} />}
         {page === 'catalog' && <Catalog {...contentProps} />}
         {page === 'reports' && <Reports {...contentProps} />}
+        {page === 'settings' && <Settings user={user} go={go} />}
       </div>
       <footer className="footer"><span>ORBE · Gestão de compras</span><span>Fluxos claros. Compras sob controle.</span></footer>
     </main>
