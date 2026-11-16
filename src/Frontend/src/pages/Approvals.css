@@ -1,0 +1,29 @@
+.approval-supplier-groups{display:grid;gap:12px}
+.approval-supplier-group{overflow:hidden}
+.approval-supplier-heading{min-height:62px;display:flex;align-items:center;gap:11px;padding:13px 18px;border-bottom:1px solid #edf0ec;background:#fbfcfa}
+.approval-supplier-heading .supplier-avatar{flex:0 0 34px}
+.approval-supplier-copy{flex:1;min-width:0}
+.approval-supplier-copy b{display:block;color:#344137;font-size:11px}
+.approval-supplier-copy span{display:block;margin-top:4px;color:#929c93;font-size:9px}
+.approval-total,.approval-supplier-total{display:flex;flex-direction:column;gap:4px;color:#315d3e}
+.approval-total{margin-left:auto;padding-left:13px;border-left:1px solid #e8ece7}
+.toolbar .result-count{margin-left:0}
+.approval-total small,.approval-supplier-total small{color:#929c93;font-size:8px}
+.approval-total b,.approval-supplier-total b{font-size:12px;white-space:nowrap}
+.approval-supplier-total{align-items:flex-end;margin-left:auto}
+.approval-supplier-group .table-scroll{padding:0 12px}
+.approval-supplier-group table{margin:0}
+.approval-decision-options{display:flex;align-items:center;gap:7px}
+.approval-decision-option{position:relative;display:inline-flex;cursor:pointer}
+.approval-decision-option input{position:absolute;width:1px;height:1px;opacity:0}
+.approval-decision-option>span{width:30px;height:30px;display:grid;place-items:center;border:1px solid #dfe5df;border-radius:7px;background:#fff;color:#a3aca4;transition:all .15s ease}
+.approval-decision-option.approve.selected>span{border-color:#86b998;background:#e8f2eb;color:#26744e}
+.approval-decision-option.reject.selected>span{border-color:#e6a19a;background:#fff0ee;color:#b44d42}
+.approval-decision-option input:focus-visible+span{outline:2px solid #78a984;outline-offset:2px}
+.approval-decision-option input:disabled+span{opacity:.6;cursor:not-allowed}
+.approval-quantity-input{width:88px;height:32px;padding:0 7px;border:1px solid #dfe5df;border-radius:6px;color:#344137;font-size:10px}
+.approval-quantity-input:disabled{background:#f6f7f5;color:#909990}
+.approval-offered-quantity{display:flex;align-items:center;gap:5px}
+.approval-save-quantity{padding:5px 7px;border:0;border-radius:5px;background:#e8f2eb;color:#26744e;font-size:8px;font-weight:700;white-space:nowrap}
+.approval-save-quantity:hover{background:#dcecdf}
+@media(max-width:780px){.approval-supplier-heading{padding:11px 13px}.approval-supplier-group .table-scroll{padding:0 7px}.approval-total{padding-left:9px}.approval-total b,.approval-supplier-total b{font-size:10px}}

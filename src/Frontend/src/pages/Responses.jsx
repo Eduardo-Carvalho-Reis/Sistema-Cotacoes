@@ -9,10 +9,61 @@ import {
 
 import { money, date, statusNames } from '../utils/formatters.js';
 import { PageTitle, Button, Badge, Empty, Stat } from '../components/index.js';
+import './Responses.css';
 
 function Responses({ data, setModal, go }) {
-  const rows = data.quotes.flatMap(q => (q.fornecedores || []).map(p => ({ quote: q, supplier: p.fornecedor, answer: q.respostas?.find(r => r.fornecedorId === p.fornecedorId) })));
-  return <><PageTitle eyebrow="RETORNO DOS FORNECEDORES" title="Respostas" description="Registre manualmente as propostas recebidas e encaminhe cada uma para análise." action={<div className="title-pill"><MessageCircle size={16}/> {rows.filter(r => r.answer).length} registradas</div>}/><div className="tip-banner"><div className="tip-mark"><MessageCircle size={18}/></div><div><b>As respostas chegam por aqui</b><span>Selecione um fornecedor para informar valores, disponibilidade e itens extras. Você pode completar a resposta antes de encaminhá-la.</span></div></div><div className="panel table-panel"><div className="panel-heading table-heading"><div><span className="eyebrow">ACOMPANHAMENTO</span><h2>Fornecedores por cotação</h2></div><span className="result-count">{rows.filter(r => !r.answer || r.answer.status === 'PREENCHIMENTO').length} aguardando preenchimento</span></div><div className="response-card-list">{rows.map(({ quote, supplier, answer }) => <div className="response-card" key={`${quote.id}-${supplier.id}`}><div className="supplier-avatar">{supplier?.nome?.slice(0,1)}</div><div className="response-main"><b>{supplier?.nome || 'Fornecedor'}</b><span>Cotação #{String(quote.id).padStart(4, '0')} · {quote.obra?.nome} · {quote.itens?.length || 0} produtos</span></div><div className="response-meta">{answer ? <Badge value={answer.status}/> : <Badge value="PENDENTE"/>}<small>{answer?.dataResposta ? `Recebida em ${date(answer.dataResposta)}` : 'Aguardando retorno'}</small></div><Button variant="secondary small-button" disabled={answer && answer.status !== 'PREENCHIMENTO'} onClick={() => setModal({ type: 'respond', quote, supplierId: supplier.id })}>{!answer ? 'Registrar resposta' : answer.status === 'PREENCHIMENTO' ? 'Continuar resposta' : 'Já encaminhada'} <ArrowRight size={15}/></Button></div>)}{!rows.length && <Empty icon={MessageCircle} title="Ainda sem solicitações" body="Crie uma cotação e envie aos fornecedores para começar a receber respostas."/>}</div></div></>;
+  const [expandedQuoteId, setExpandedQuoteId] = useState(null);
+  const [workId, setWorkId] = useState('');
+  const [supplierId, setSupplierId] = useState('');
+  const quotes = data.quotes.filter(quote =>
+    quote.fornecedores?.length
+    && (!workId || String(quote.obraId) === workId)
+    && (!supplierId || quote.fornecedores.some(item => String(item.fornecedorId) === supplierId))
+  );
+  const quoteRows = quotes.map(quote => ({
+    quote,
+    suppliers: quote.fornecedores.filter(item => !supplierId || String(item.fornecedorId) === supplierId).map(item => ({
+      supplier: item.fornecedor,
+      answer: quote.respostas?.find(response => response.fornecedorId === item.fornecedorId),
+    })),
+  }));
+  const totalRegistered = quoteRows.reduce((total, row) => total + row.suppliers.filter(item => item.answer).length, 0);
+  const totalPending = quoteRows.reduce((total, row) => total + row.suppliers.filter(item => !item.answer || item.answer.status === 'PREENCHIMENTO').length, 0);
+
+  return <>
+    <PageTitle eyebrow="RETORNO DOS FORNECEDORES" title="Respostas" description="Acompanhe as respostas agrupadas por cotação e registre as propostas recebidas." action={<div className="title-pill"><MessageCircle size={16}/> {totalRegistered} registradas</div>}/>
+    <div className="tip-banner"><div className="tip-mark"><MessageCircle size={18}/></div><div><b>As respostas chegam por aqui</b><span>Abra uma cotação para ver os fornecedores e registrar valores, disponibilidade e itens extras.</span></div></div>
+    <div className="toolbar response-filters">
+      <label className="select-wrap"><Building2 size={15}/><select aria-label="Filtrar por obra" value={workId} onChange={event => setWorkId(event.target.value)}><option value="">Todas as obras</option>{data.works.map(work => <option key={work.id} value={work.id}>{work.nome}</option>)}</select></label>
+      <label className="select-wrap"><Users size={15}/><select aria-label="Filtrar por fornecedor" value={supplierId} onChange={event => setSupplierId(event.target.value)}><option value="">Todos os fornecedores</option>{data.suppliers.map(supplier => <option key={supplier.id} value={supplier.id}>{supplier.nome}</option>)}</select></label>
+    </div>
+    <div className="panel table-panel">
+      <div className="panel-heading table-heading"><div><span className="eyebrow">ACOMPANHAMENTO</span><h2>Cotações</h2></div><span className="result-count">{totalPending} aguardando preenchimento</span></div>
+      <div className="response-quote-list">
+        {quoteRows.map(({ quote, suppliers }) => {
+          const expanded = expandedQuoteId === quote.id;
+          const answered = suppliers.filter(item => item.answer).length;
+          return <section className="response-quote-group" key={quote.id}>
+            <button className="response-quote-heading" type="button" aria-expanded={expanded} aria-controls={'response-quote-' + quote.id} onClick={() => setExpandedQuoteId(current => current === quote.id ? null : quote.id)}>
+              <span className="response-quote-icon"><ClipboardList size={17}/></span>
+              <span className="response-quote-title"><b>Cotação #{String(quote.id).padStart(4, '0')}</b><span>{quote.obra?.nome || 'Obra'} · {quote.itens?.length || 0} produtos</span></span>
+              <span className="response-quote-counts"><span>{answered} de {suppliers.length} respostas</span><small>{suppliers.length - answered} aguardando</small></span>
+              <ChevronRight className={'response-quote-chevron' + (expanded ? ' expanded' : '')} size={18}/>
+            </button>
+            {expanded && <div className="response-quote-suppliers" id={'response-quote-' + quote.id}>
+              {suppliers.map(({ supplier, answer }) => <div className="response-card" key={supplier?.id || quote.id}>
+                <div className="supplier-avatar">{supplier?.nome?.slice(0, 1)}</div>
+                <div className="response-main"><b>{supplier?.nome || 'Fornecedor'}</b><span>{quote.itens?.length || 0} produtos solicitados</span></div>
+                <div className="response-meta">{answer ? <Badge value={answer.status}/> : <Badge value="PENDENTE"/>}<small>{answer?.dataResposta ? 'Recebida em ' + date(answer.dataResposta) : 'Aguardando retorno'}</small></div>
+                <Button variant="secondary small-button" disabled={answer && answer.status !== 'PREENCHIMENTO'} onClick={() => setModal({ type: 'respond', quote, supplierId: supplier.id })}>{!answer ? 'Registrar resposta' : answer.status === 'PREENCHIMENTO' ? 'Continuar resposta' : 'Já encaminhada'} <ArrowRight size={15}/></Button>
+              </div>)}
+            </div>}
+          </section>;
+        })}
+        {!quoteRows.length && <Empty icon={MessageCircle} title="Ainda sem solicitações" body="Crie uma cotação e envie aos fornecedores para começar a receber respostas."/>}
+      </div>
+    </div>
+  </>;
 }
 
 function ResponseModal({ quote, supplierId: initialSupplierId, data, api, refresh, notify, onClose }) {

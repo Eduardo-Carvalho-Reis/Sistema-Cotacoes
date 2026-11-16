@@ -169,6 +169,24 @@ router.post("/respostas/:id/encaminhar", async (req, res) => {
   } catch (e) { fail(res, e); }
 });
 
+router.patch("/compras/ofertas/:id/quantidade-ofertada", permitir("ADMINISTRADOR", "ADMINISTRADOR_SISTEMA"), async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const quantidadeOfertada = Number(req.body.quantidadeOfertada);
+    if (!Number.isFinite(quantidadeOfertada) || quantidadeOfertada <= 0) throw new Error("A quantidade ofertada deve ser maior que zero.");
+
+    const oferta = await prisma.cotacaoRespostaItem.findUniqueOrThrow({ where: { id }, include: { resposta: true } });
+    if (oferta.resposta.status !== "ENCAMINHADA" || oferta.status !== "PENDENTE" || oferta.indisponivel) {
+      throw new Error("Somente ofertas encaminhadas e ainda sem decisão podem ser editadas.");
+    }
+
+    const aprovada = await prisma.selecaoCompraItem.aggregate({ where: { status: "APROVADA", cotacaoRespostaItemId: id }, _sum: { quantidadeAprovada: true } });
+    if (Number(aprovada._sum.quantidadeAprovada || 0) > quantidadeOfertada) throw new Error("A quantidade ofertada não pode ficar abaixo da quantidade já aprovada.");
+
+    res.json(await prisma.cotacaoRespostaItem.update({ where: { id }, data: { quantidadeOfertada } }));
+  } catch (e) { fail(res, e); }
+});
+
 router.post("/compras/aprovar", permitir("ADMINISTRADOR", "ADMINISTRADOR_SISTEMA"), async (req, res) => {
   try {
     const { cotacaoEnvioId, itens } = req.body;
