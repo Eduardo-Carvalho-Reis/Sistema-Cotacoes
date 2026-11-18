@@ -6,6 +6,8 @@ import { permitir, assertObraAccess, obraScope, isAdminUser } from "../middlewar
 import { registrarAuditoria } from "../Services/audit.service.js";
 import { validarTransicaoCotacao, respostasEstaoPendentes } from "../Services/cotacao-state.service.js";
 import { calcularStatusEntrega } from "../Services/delivery.service.js";
+import { notificarUsuario, tentarNovamenteNotificacao } from "../Services/notification.service.js";
+import { calcularRankingFornecedores, agruparGastosPorObraMes, calcularEstatisticasPreco } from "../Services/reports.service.js";
 
 const router = Router();
 const whatsapp = new WhatsAppProvider();
@@ -215,6 +217,7 @@ router.post("/compras/:id/cancelar", permitir("ADMINISTRADOR", "ADMINISTRADOR_SI
       for (const pedido of pedidos) if (pedido.status !== "CANCELADO") await tx.historicoStatus.create({ data: { entidadeTipo: "PedidoCompra", entidadeId: pedido.id, statusAnterior: pedido.status, statusNovo: "CANCELADO", usuarioId: req.usuario.id, pedidoCompraId: pedido.id, observacao: observacaoCancelamento } });
       return atualizada;
     });
+    await notificarUsuario({ usuarioId: result.solicitanteId || req.usuario.id, evento: "COMPRA_CANCELADA", entidadeTipo: "Compra", entidadeId: compraId, chaveIdempotencia: `compra-cancelada:${compraId}`, mensagem: `A compra #${compraId} foi cancelada. Motivo: ${observacaoCancelamento}` }).catch(() => {});
     res.json(result);
   } catch (e) { fail(res, e); }
 });
@@ -272,6 +275,7 @@ router.post("/cotacoes/:id/enviar", async (req, res) => {
         await registrarAuditoria(tx, { usuarioId: req.usuario.id, operacao: "ENVIAR", entidadeTipo: "CotacaoEnvio", entidadeId: id, valoresAntes: { status: c.status }, valoresNovos: { status }, detalhes: { resultados }, cotacaoEnvioId: id });
       });
     }
+    if (resultados.some(item => item.status === "ENVIADO")) await notificarUsuario({ usuarioId: c.usuarioId, evento: "COTACAO_ENVIADA", entidadeTipo: "CotacaoEnvio", entidadeId: id, chaveIdempotencia: `cotacao-enviada:${id}`, mensagem: `A cotacao #${id} foi enviada aos fornecedores da obra ${c.obra.nome}.` }).catch(() => {});
     res.json(resultados);
   } catch (e) { fail(res, e); }
 });
@@ -423,6 +427,7 @@ router.post("/respostas/:id/encaminhar", async (req, res) => {
     const enviados = envios.filter(item => item.status === "ENVIADO");
     const falhas = envios.filter(item => item.status === "FALHOU");
     if (!updated) return res.status(502).json({ erro: `NÃ£o foi possÃ­vel enviar a resposta por WhatsApp: ${falhas.map(item => `${item.destinatario.nome}: ${item.erro}`).join("; ")}` });
+    await notificarUsuario({ usuarioId: current.cotacao.usuarioId, evento: "NOVA_RESPOSTA", entidadeTipo: "CotacaoResposta", entidadeId: respostaId, chaveIdempotencia: `resposta-recebida:${respostaId}`, mensagem: `Uma resposta do fornecedor ${current.fornecedor.nome} foi recebida na cotacao #${current.cotacaoEnvioId}.` }).catch(() => {});
     res.json({ resposta: updated, whatsapp: { enviados: enviados.map(item => item.destinatario.nome), falhas: falhas.map(item => ({ nome: item.destinatario.nome, erro: item.erro })) } });
   } catch (e) { fail(res, e); }
 });
@@ -503,6 +508,7 @@ router.post("/compras/aprovar", permitir("ADMINISTRADOR", "ADMINISTRADOR_SISTEMA
     }, { isolationLevel: "Serializable" });
     const ofertasAprovadasAgora = new Set(itens.filter(item => item.status !== "REJEITADA").map(item => Number(item.ofertaId)));
     const aprovados = compra.selecoes.filter(selecao => selecao.status === "APROVADA" && ofertasAprovadasAgora.has(selecao.cotacaoRespostaItemId));
+    if (!aprovados.length && compra.cotacao.status === "ENCERRADA") await notificarUsuario({ usuarioId: compra.cotacao.usuarioId, evento: "COTACAO_ENCERRADA", entidadeTipo: "CotacaoEnvio", entidadeId: compra.cotacaoEnvioId, chaveIdempotencia: `cotacao-encerrada:${compra.cotacaoEnvioId}`, mensagem: `A cotacao #${compra.cotacaoEnvioId} foi encerrada sem compra aprovada.` }).catch(() => {});
     const grupos = Map.groupBy(aprovados, selecao => selecao.oferta.resposta.fornecedorId);
     const dataFechamento = new Intl.DateTimeFormat("pt-BR", { timeZone: "America/Sao_Paulo" }).format(new Date());
     const notificacoes = await Promise.all([...grupos.values()].map(async selecoes => {
@@ -545,6 +551,7 @@ router.post("/compras/aprovar", permitir("ADMINISTRADOR", "ADMINISTRADOR_SISTEMA
         return { fornecedorId: fornecedor.id, status: "FALHOU", erro: erro.message };
       }
     }));
+    if (aprovados.length) await notificarUsuario({ usuarioId: compra.solicitanteId || req.usuario.id, evento: "COMPRA_APROVADA", entidadeTipo: "Compra", entidadeId: compra.id, chaveIdempotencia: `compra-aprovada:${compra.id}`, mensagem: `A compra #${compra.id} da obra ${compra.obra.nome} foi aprovada. Total aprovado: R$ ${Number(compra.valorAprovado || 0).toFixed(2)}.` }).catch(() => {});
     res.status(201).json({ compra, notificacoes });
   } catch (e) { fail(res, e); }
 });
@@ -588,6 +595,7 @@ router.post("/compras/:id/encerrar-analise", permitir("ADMINISTRADOR", "ADMINIST
       await registrarAuditoria(tx, { usuarioId: req.usuario.id, operacao: "ENCERRAR", entidadeTipo: "CotacaoEnvio", entidadeId: cotacao.id, valoresAntes: { status: current.cotacao.status }, valoresNovos: { status: cotacao.status }, cotacaoEnvioId: cotacao.id });
       return cotacao;
     });
+    await notificarUsuario({ usuarioId: compra.usuarioId, evento: "COTACAO_ENCERRADA", entidadeTipo: "CotacaoEnvio", entidadeId: compra.id, chaveIdempotencia: `cotacao-encerrada:${compra.id}`, mensagem: `A cotacao #${compra.id} foi encerrada sem compra aprovada.` }).catch(() => {});
     res.json(compra);
   } catch (e) { fail(res, e); }
 });
@@ -740,7 +748,7 @@ router.patch("/pedidos/itens/:id/entrega", async (req, res) => {
 
 router.get("/relatorios/gastos", async (req, res) => {
   try {
-    const purchases = await prisma.pedidoCompra.findMany({ where: { status: { not: "CANCELADO" }, compra: { ...obraScope(req.usuario), ...(isAdminUser(req.usuario) && req.query.obraId ? { obraId: Number(req.query.obraId) } : {}), dataCriacao: req.query.de || req.query.ate ? { gte: req.query.de ? new Date(req.query.de) : undefined, lte: req.query.ate ? new Date(req.query.ate) : undefined } : undefined } }, include: { fornecedor: true, compra: { include: { obra: true } }, itens: { include: { selecao: { include: { oferta: { include: { produto: true } } } } } } } });
+    const purchases = await prisma.pedidoCompra.findMany({ where: { status: { not: "CANCELADO" }, fornecedorId: req.query.fornecedorId ? Number(req.query.fornecedorId) : undefined, itens: req.query.produtoId ? { some: { selecao: { oferta: { produtoId: Number(req.query.produtoId) } } } } : undefined, compra: { ...obraScope(req.usuario), ...(isAdminUser(req.usuario) && req.query.obraId ? { obraId: Number(req.query.obraId) } : {}), dataCriacao: req.query.de || req.query.ate ? { gte: req.query.de ? new Date(req.query.de) : undefined, lte: req.query.ate ? new Date(`${req.query.ate}T23:59:59.999`) : undefined } : undefined } }, include: { fornecedor: true, compra: { include: { obra: true } }, itens: { include: { selecao: { include: { oferta: { include: { produto: true } } } } } } } });
     const linhas = purchases.flatMap(p => p.itens.map(i => ({ obra: p.compra.obra.nome, fornecedor: p.fornecedor.nome, produto: i.selecao.oferta.produto.nome, quantidade: Number(i.quantidade), valorUnitario: Number(i.valorUnitario), total: Number(i.quantidade) * Number(i.valorUnitario), data: p.compra.dataCriacao.toISOString() })));
     const chave = req.query.agruparPor === "fornecedor" ? "fornecedor" : req.query.agruparPor === "produto" ? "produto" : "obra";
     const resumo = Object.entries(Object.groupBy(linhas, x => x[chave])).map(([nome, ls]) => ({ nome, total: ls.reduce((s, x) => s + x.total, 0), quantidade: ls.reduce((s, x) => s + x.quantidade, 0) }));
@@ -762,6 +770,41 @@ router.get("/relatorios/gastos", async (req, res) => {
       pdf.end(); return;
     }
     res.json({ filtros: req.query, resumo, linhas });
+  } catch (e) { fail(res, e); }
+});
+
+router.get("/relatorios/gerencial", async (req, res) => {
+  try {
+    const pedidos = await prisma.pedidoCompra.findMany({ where: {
+      status: { not: "CANCELADO" },
+      ...(req.query.fornecedorId ? { fornecedorId: Number(req.query.fornecedorId) } : {}),
+      compra: { ...obraScope(req.usuario), ...(isAdminUser(req.usuario) && req.query.obraId ? { obraId: Number(req.query.obraId) } : {}), dataCriacao: req.query.de || req.query.ate ? { gte: req.query.de ? new Date(req.query.de) : undefined, lte: req.query.ate ? new Date(`${req.query.ate}T23:59:59.999`) : undefined } : undefined },
+      itens: req.query.produtoId ? { some: { selecao: { oferta: { produtoId: Number(req.query.produtoId) } } } } : undefined,
+    }, include: { fornecedor: true, compra: { include: { obra: true } }, itens: { include: { selecao: { include: { oferta: { include: { produto: true } } } } } } } });
+    const linhas = pedidos.flatMap(pedido => pedido.itens.map(item => {
+      const produto = item.selecao.oferta.produto;
+      const data = pedido.compra.dataCriacao;
+      return { compraId: pedido.compraId, obraId: pedido.compra.obraId, obra: pedido.compra.obra.nome, fornecedorId: pedido.fornecedorId, fornecedor: pedido.fornecedor.nome, produtoId: produto.id, produto: produto.nome, unidade: produto.unidade, categoria: null, quantidade: Number(item.quantidade), valorUnitario: Number(item.valorUnitario), total: Number(item.quantidade) * Number(item.valorUnitario), data: data.toISOString(), mes: data.toISOString().slice(0, 7) };
+    }));
+    res.json({ filtros: req.query, fornecedores: calcularRankingFornecedores(linhas), gastosPorObraMes: agruparGastosPorObraMes(linhas), linhas });
+  } catch (e) { fail(res, e); }
+});
+
+router.get("/relatorios/precos", async (req, res) => {
+  try {
+    const produtoId = Number(req.query.produtoId);
+    if (!Number.isInteger(produtoId) || produtoId <= 0) throw new Error("Informe um produto para comparar precos.");
+    const produto = await prisma.produto.findUniqueOrThrow({ where: { id: produtoId } });
+    const ofertas = await prisma.cotacaoRespostaItem.findMany({ where: {
+      produtoId,
+      indisponivel: false,
+      itemSolicitado: { is: { produtoId } },
+      resposta: { is: { status: { in: ["ENCAMINHADA", "APROVADA", "ENCERRADA"] }, fornecedorId: req.query.fornecedorId ? Number(req.query.fornecedorId) : undefined, cotacao: { is: { ...obraScope(req.usuario), ...(isAdminUser(req.usuario) && req.query.obraId ? { obraId: Number(req.query.obraId) } : {}), dataCriacao: req.query.de || req.query.ate ? { gte: req.query.de ? new Date(req.query.de) : undefined, lte: req.query.ate ? new Date(`${req.query.ate}T23:59:59.999`) : undefined } : undefined } } } },
+    }, include: { itemSolicitado: true, resposta: { include: { fornecedor: true, cotacao: { include: { obra: true } } } } } });
+    const linhas = ofertas.filter(oferta => oferta.itemSolicitado?.unidade === produto.unidade).map(oferta => ({ produtoId, produto: produto.nome, especificacao: produto.referencia || produto.nome, unidade: oferta.itemSolicitado.unidade, quantidadeSolicitada: Number(oferta.itemSolicitado.quantidadeSolicitada), quantidade: Number(oferta.quantidadeOfertada), valorUnitario: Number(oferta.valorUnitario), total: Number(oferta.quantidadeOfertada) * Number(oferta.valorUnitario), fornecedorId: oferta.resposta.fornecedorId, fornecedor: oferta.resposta.fornecedor.nome, cotacaoId: oferta.resposta.cotacaoEnvioId, obra: oferta.resposta.cotacao.obra.nome, data: oferta.resposta.dataResposta || oferta.resposta.cotacao.dataCriacao, frete: null, condicaoPagamento: null }));
+    linhas.sort((a, b) => a.valorUnitario - b.valorUnitario);
+    const estatisticas = calcularEstatisticasPreco(linhas);
+    res.json({ produto: { id: produto.id, nome: produto.nome, especificacao: produto.referencia || produto.nome, unidade: produto.unidade }, linhas, estatisticas: estatisticas[0] || null });
   } catch (e) { fail(res, e); }
 });
 
@@ -800,6 +843,23 @@ router.get("/historico", async (req, res) => {
     res.json({ status: historico, alteracoes: auditoria });
   }
   catch (e) { fail(res, e); }
+});
+
+router.get("/notificacoes", async (req, res) => {
+  try {
+    const rows = await prisma.notificacao.findMany({ where: isAdminUser(req.usuario) ? {} : { usuarioId: req.usuario.id }, orderBy: { criadoEm: "desc" }, take: Math.min(Number(req.query.limite) || 100, 500) });
+    res.json(rows.map(row => ({ ...row, id: row.id.toString() })));
+  } catch (e) { fail(res, e); }
+});
+
+router.post("/notificacoes/:id/tentar-novamente", async (req, res) => {
+  try {
+    const id = BigInt(req.params.id);
+    const current = await prisma.notificacao.findUniqueOrThrow({ where: { id } });
+    if (!isAdminUser(req.usuario) && current.usuarioId !== req.usuario.id) return res.status(403).json({ erro: "Permissao insuficiente." });
+    const row = await tentarNovamenteNotificacao(id);
+    res.json({ ...row, id: row.id.toString() });
+  } catch (e) { fail(res, e); }
 });
 
 router.get("/respostas/:id/envios", async (req, res) => {

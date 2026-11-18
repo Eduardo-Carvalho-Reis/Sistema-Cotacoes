@@ -41,6 +41,7 @@ model Usuario {
   enviosCotacao HistoricoEnvioMensagem[]
   historicosNotaFiscal HistoricoNotaFiscal[]
   sessaoWhatsApp WhatsAppSessao?
+  notificacoes Notificacao[]
 }
 
 model WhatsAppDestinatario {
@@ -489,4 +490,27 @@ model HistoricoEnvioResposta {
   resposta              CotacaoResposta @relation(fields: [cotacaoRespostaId], references: [id], onDelete: Restrict)
   usuario               Usuario         @relation(fields: [usuarioId], references: [id], onDelete: Restrict)
   @@index([cotacaoRespostaId, dataHora])
+}
+
+model Notificacao {
+  id                BigInt   @id @default(autoincrement())
+  usuarioId         Int
+  evento            String
+  entidadeTipo      String
+  entidadeId        String
+  destinatarioNome  String?
+  telefone          String?
+  mensagem          String
+  chaveIdempotencia String   @unique
+  status            String   @default("PENDENTE")
+  tentativas        Int      @default(0)
+  erro              String?
+  proximaTentativa  DateTime?
+  criadoEm          DateTime @default(now())
+  enviadoEm         DateTime?
+  usuario           Usuario @relation(fields: [usuarioId], references: [id], onDelete: Restrict)
+
+  @@index([usuarioId, criadoEm])
+  @@index([status, proximaTentativa])
+  @@index([entidadeTipo, entidadeId])
 }

@@ -22,6 +22,8 @@ API em Node.js, Express, Prisma e PostgreSQL para cadastro operacional, cotaçõ
 - `/api/compras/aprovar`: aprova/rejeita ofertas e quantidades; `/api/compras/:id/pedidos` agrupa as aprovações por fornecedor e `/:id/encerrar-analise` encerra ofertas pendentes.
 - `/api/pedidos`: confirmação, notas fiscais e recebimentos parciais por item.
 - `/api/relatorios/gastos`: filtros `obraId`, `de`, `ate`, `agruparPor` (obra, fornecedor ou produto) e `formato=csv|pdf`; `/api/relatorios/cotacoes` exporta comparativos com os mesmos formatos.
+- `/api/relatorios/gerencial` retorna ranking de fornecedores e gastos mensais por obra; `/api/relatorios/precos` compara e resume historico por produto, unidade, periodo, fornecedor e obra.
+- `/api/notificacoes` consulta notificacoes e tentativas; o worker da API tenta novamente envios pendentes e verifica entregas proximas/atrasadas a cada minuto.
 - `/api/historico`: consulta trilha de alterações.
 
 ### Integracao com WPPConnect Server
