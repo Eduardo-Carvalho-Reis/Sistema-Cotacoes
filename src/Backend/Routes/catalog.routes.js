@@ -95,7 +95,13 @@ const resource = (path, model, fields, { soft = true, secret = false } = {}) => 
     try {
       if (!admin(req, res) || !canWrite(req, res)) return;
       const id = Number(req.params.id);
-      const row = soft ? await prisma[model].update({ where: { id }, data: { ativo: false } }) : await prisma[model].delete({ where: { id } });
+      const row = secret ? await prisma.$transaction(async tx => {
+        const before = await tx[model].findUniqueOrThrow({ where: { id }, omit: { senhaHash: true } });
+        if (id === req.usuario.id) throw new Error("You cannot deactivate your own account.");
+        const updated = await tx[model].update({ where: { id }, data: { ativo: false }, omit: { senhaHash: true } });
+        await registrarAuditoria(tx, { usuarioId: req.usuario.id, operacao: "DESATIVAR_USUARIO", entidadeTipo: "Usuario", entidadeId: id, valoresAntes: { ativo: before.ativo }, valoresNovos: { ativo: updated.ativo } });
+        return updated;
+      }) : soft ? await prisma[model].update({ where: { id }, data: { ativo: false } }) : await prisma[model].delete({ where: { id } });
       res.json(secret ? { id: row.id, ativo: row.ativo } : row);
     } catch (e) { res.status(400).json({ erro: e.message }); }
   });
