@@ -16,6 +16,17 @@ export function agruparGastosPorObraMes(linhas) {
   return [...agrupado.values()].map(rows => ({ obraId: rows[0].obraId, obra: rows[0].obra, mes: rows[0].mes, total: rows.reduce((sum, row) => sum + row.total, 0) })).sort((a, b) => a.mes.localeCompare(b.mes) || a.obra.localeCompare(b.obra));
 }
 
+export function agruparGastosPorCategoria(linhas) {
+  const agrupado = Map.groupBy(linhas, row => row.categoria || "Sem categoria");
+  return [...agrupado.entries()].map(([categoria, rows]) => ({
+    categoria,
+    total: rows.reduce((sum, row) => sum + row.total, 0),
+    participacaoPercentual: linhas.reduce((sum, row) => sum + row.total, 0)
+      ? rows.reduce((sum, row) => sum + row.total, 0) / linhas.reduce((sum, row) => sum + row.total, 0) * 100
+      : 0,
+  })).sort((a, b) => b.total - a.total);
+}
+
 export function calcularEstatisticasPreco(linhas) {
   const agrupado = Map.groupBy(linhas, row => `${row.produtoId}:${row.unidade}`);
   return [...agrupado.values()].map(rows => {

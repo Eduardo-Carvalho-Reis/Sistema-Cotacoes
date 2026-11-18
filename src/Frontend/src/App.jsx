@@ -15,7 +15,7 @@ function App() {
   const [token, setToken] = useState(localStorage.getItem('orbe-token'));
   const [user, setUser] = useState(null);
   const [page, setPage] = useState('overview');
-  const [data, setData] = useState({ quotes: [], purchases: [], works: [], products: [], suppliers: [], equipment: [], applications: [] });
+  const [data, setData] = useState({ quotes: [], purchases: [], works: [], products: [], categories: [], suppliers: [], equipment: [], applications: [] });
   const [notice, setNotice] = useState('');
   const [loading, setLoading] = useState(false);
   const [modal, setModal] = useState(null);
@@ -40,10 +40,10 @@ function App() {
     if (!token) return;
     setLoading(true);
     try {
-      const [quotes, purchases, works, products, suppliers, equipment, applications] = await Promise.all([
-        api('/api/cotacoes?limite=100'), api('/api/compras'), api('/api/catalogos/obras'), api('/produto'), api('/fornecedor'), api('/api/catalogos/equipamentos'), api('/api/catalogos/aplicacoes'),
+      const [quotes, purchases, works, products, categories, suppliers, equipment, applications] = await Promise.all([
+        api('/api/cotacoes?limite=100'), api('/api/compras'), api('/api/catalogos/obras'), api('/produto'), api('/api/catalogos/categorias-produto'), api('/fornecedor'), api('/api/catalogos/equipamentos'), api('/api/catalogos/aplicacoes'),
       ]);
-      setData({ quotes, purchases, works, products, suppliers, equipment, applications });
+      setData({ quotes, purchases, works, products, categories, suppliers, equipment, applications });
     } catch (e) { notify(e.message); }
     finally { setLoading(false); }
   }, [api, token]);
@@ -88,7 +88,7 @@ function App() {
         {page === 'responses' && <Responses {...contentProps} />}
         {page === 'approval' && <Approvals {...contentProps} user={user} />}
         {page === 'purchases' && <Purchases {...contentProps} user={user} />}
-        {page === 'catalog' && <Catalog {...contentProps} />}
+        {page === 'catalog' && <Catalog {...contentProps} user={user} />}
         {page === 'reports' && <Reports {...contentProps} />}
         {page === 'settings' && <Settings user={user} go={go} />}
         {page === 'whatsapp' && <WhatsApp {...contentProps} />}

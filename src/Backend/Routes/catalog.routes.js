@@ -14,7 +14,7 @@ const resource = (path, model, fields, { soft = true, secret = false } = {}) => 
     }
     return true;
   };
-  const canWrite = (req, res) => model !== "obra" || isAdminUser(req.usuario) || (res.status(403).json({ erro: "Only administrators can manage worksites." }), false);
+  const canWrite = (req, res) => !["obra", "categoriaProduto"].includes(model) || isAdminUser(req.usuario) || (res.status(403).json({ erro: "Only administrators can manage global reference data." }), false);
 
   r.get("/", async (req, res) => {
     try {
@@ -109,6 +109,7 @@ const resource = (path, model, fields, { soft = true, secret = false } = {}) => 
 };
 
 resource("/obras", "obra", ["nome", "endereco", "ativo"]);
+resource("/categorias-produto", "categoriaProduto", ["nome", "descricao", "ativo"]);
 resource("/equipamentos", "equipamento", ["nome", "chassi", "potenciaCapacidade", "ano", "placa", "ativo"]);
 resource("/aplicacoes", "aplicacao", ["nome", "tipo", "equipamentoId", "ativo"]);
 resource("/usuarios", "usuario", ["nome", "cpf", "email", "perfilId", "obraId", "ativo"], { secret: true });

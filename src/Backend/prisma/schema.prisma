@@ -82,6 +82,14 @@ model Obra {
   usuarios Usuario[]
 }
 
+model CategoriaProduto {
+  id        Int       @id @default(autoincrement())
+  nome      String    @unique
+  descricao String?
+  ativo     Boolean   @default(true)
+  produtos  Produto[]
+}
+
 model Equipamento {
   id                 Int         @id @default(autoincrement())
   nome               String
@@ -131,7 +139,10 @@ model Produto {
   nomePopular      String?
   unidade          String                @default("UN")
   precoAtual       Decimal?              @db.Decimal(12, 2)
+  especificacao    String?
+  categoriaId      Int?
   ativo            Boolean               @default(true)
+  categoria        CategoriaProduto?     @relation(fields: [categoriaId], references: [id], onDelete: SetNull)
   itensSolicitados CotacaoEnvioItem[]
   itensResposta    CotacaoRespostaItem[]
   fornecedores     ProdutoFornecedor[]
@@ -225,6 +236,8 @@ model CotacaoResposta {
   usuarioPreenchimentoId Int?
   dataResposta           DateTime?
   observacao             String?
+  frete                  Decimal?              @db.Decimal(12, 2)
+  condicaoPagamento      String?
   status                 StatusResposta        @default(PREENCHIMENTO)
   cotacao                CotacaoEnvio          @relation(fields: [cotacaoEnvioId], references: [id], onDelete: Restrict)
   fornecedor             Fornecedor            @relation(fields: [fornecedorId], references: [id], onDelete: Restrict)
