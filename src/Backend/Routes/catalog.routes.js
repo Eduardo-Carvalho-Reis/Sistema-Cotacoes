@@ -1,22 +1,23 @@
 import { Router } from "express";
 import { prisma } from "../prisma/lib/prisma.ts";
 import bcrypt from "bcryptjs";
+import { isAdminUser } from "../middleware/auth.js";
 
 const router = Router();
 const resource = (path, model, fields, { soft = true, secret = false } = {}) => {
   const r = Router();
   const admin = (req, res) => {
-    if ((model === "usuario" || model === "perfil") && !["ADMINISTRADOR", "ADMINISTRADOR_SISTEMA"].includes(req.usuario?.perfil)) {
+    if ((model === "usuario" || model === "perfil" || model === "obra") && !isAdminUser(req.usuario)) {
       res.status(403).json({ erro: "Permissão insuficiente." }); return false;
     }
     return true;
   };
   r.get("/", async (req, res) => {
-    try { if (!admin(req, res)) return; res.json(await prisma[model].findMany({ where: { ativo: true }, orderBy: { id: "desc" }, take: Math.min(Number(req.query.limite) || 100, 500), ...(secret ? { omit: { senhaHash: true } } : {}) })); }
+    try { if (!admin(req, res)) return; const where = { ativo: true, ...(model === "obra" && !isAdminUser(req.usuario) ? { id: req.usuario.obraId || -1 } : {}) }; res.json(await prisma[model].findMany({ where, orderBy: { id: "desc" }, take: Math.min(Number(req.query.limite) || 100, 500), ...(secret ? { omit: { senhaHash: true } } : {}) })); }
     catch (e) { res.status(400).json({ erro: e.message }); }
   });
   r.get("/:id", async (req, res) => {
-    try { if (!admin(req, res)) return; res.json(await prisma[model].findUniqueOrThrow({ where: { id: Number(req.params.id) }, ...(secret ? { omit: { senhaHash: true } } : {}) })); }
+    try { if (!admin(req, res)) return; const row = await prisma[model].findUniqueOrThrow({ where: { id: Number(req.params.id) }, ...(secret ? { omit: { senhaHash: true } } : {}) }); if (model === "obra" && !isAdminUser(req.usuario) && row.id !== req.usuario.obraId) return res.status(403).json({ erro: "Permissão insuficiente." }); res.json(row); }
     catch (e) { res.status(404).json({ erro: "Registro não encontrado." }); }
   });
   r.post("/", async (req, res) => {

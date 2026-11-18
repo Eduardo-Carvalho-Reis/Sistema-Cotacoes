@@ -21,15 +21,20 @@ model Usuario {
   email        String              @unique
   senhaHash    String
   perfilId     Int
+  obraId       Int?
   ativo        Boolean             @default(true)
   criadoEm     DateTime            @default(now())
   perfil       Perfil              @relation(fields: [perfilId], references: [id], onDelete: Restrict)
+  obra         Obra?               @relation(fields: [obraId], references: [id], onDelete: Restrict)
   cotacoes     CotacaoEnvio[]
   respostas    CotacaoResposta[]
   aprovacoes   SelecaoCompraItem[]
   recebimentos RecebimentoItem[]
   historicos   HistoricoStatus[]
   whatsappDestinatarios WhatsAppDestinatario[]
+  auditorias   Auditoria[]
+  cotacoesCanceladas CotacaoEnvio[] @relation("CotacaoCanceladaPor")
+  enviosResposta HistoricoEnvioResposta[]
 }
 
 model WhatsAppDestinatario {
@@ -54,6 +59,7 @@ model Obra {
   ativo    Boolean        @default(true)
   cotacoes CotacaoEnvio[]
   compras  Compra[]
+  usuarios Usuario[]
 }
 
 model Equipamento {
@@ -132,20 +138,25 @@ model CotacaoEnvio {
   dataCriacao  DateTime                 @default(now())
   observacao   String?
   status       StatusCotacaoEnvio       @default(RASCUNHO)
+  cancelamentoMotivo String?
+  canceladaEm  DateTime?
+  canceladaPorId Int?
   obra         Obra                     @relation(fields: [obraId], references: [id], onDelete: Restrict)
   usuario      Usuario                  @relation(fields: [usuarioId], references: [id], onDelete: Restrict)
+  canceladaPor Usuario?                 @relation("CotacaoCanceladaPor", fields: [canceladaPorId], references: [id], onDelete: SetNull)
   itens        CotacaoEnvioItem[]
   fornecedores CotacaoEnvioFornecedor[]
   respostas    CotacaoResposta[]
   compras      Compra[]
   historicos   HistoricoStatus[]
+  auditorias   Auditoria[]
 }
 
 enum StatusCotacaoEnvio {
   RASCUNHO
   ENVIADA
-  EM_ANALISE
-  APROVADA
+  EM_ANDAMENTO
+  CONCLUIDA
   ENCERRADA
   CANCELADA
 }
@@ -199,6 +210,7 @@ model CotacaoResposta {
   fornecedor             Fornecedor            @relation(fields: [fornecedorId], references: [id], onDelete: Restrict)
   usuario                Usuario?              @relation(fields: [usuarioPreenchimentoId], references: [id], onDelete: SetNull)
   itens                  CotacaoRespostaItem[]
+  historicoEnvios        HistoricoEnvioResposta[]
 
   @@unique([cotacaoEnvioId, fornecedorId])
 }
@@ -249,6 +261,7 @@ model Compra {
   selecoes       SelecaoCompraItem[]
   pedidos        PedidoCompra[]
   historicos     HistoricoStatus[]
+  auditorias     Auditoria[]
 }
 
 enum StatusCompra {
@@ -290,6 +303,7 @@ model PedidoCompra {
   itens        PedidoCompraItem[]
   notasFiscais NotaFiscal[]
   historicos   HistoricoStatus[]
+  auditorias   Auditoria[]
 
   @@unique([compraId, fornecedorId])
 }
@@ -357,6 +371,28 @@ model HistoricoStatus {
   @@index([entidadeTipo, entidadeId])
 }
 
+model Auditoria {
+  id           BigInt   @id @default(autoincrement())
+  usuarioId    Int?
+  operacao     String
+  entidadeTipo String
+  entidadeId   String
+  valoresAntes Json?
+  valoresNovos Json?
+  detalhes     Json?
+  dataHora     DateTime @default(now())
+  usuario      Usuario? @relation(fields: [usuarioId], references: [id], onDelete: SetNull)
+  cotacaoEnvioId Int?
+  cotacaoEnvio CotacaoEnvio? @relation(fields: [cotacaoEnvioId], references: [id], onDelete: SetNull)
+  compraId     Int?
+  compra       Compra? @relation(fields: [compraId], references: [id], onDelete: SetNull)
+  pedidoCompraId Int?
+  pedidoCompra PedidoCompra? @relation(fields: [pedidoCompraId], references: [id], onDelete: SetNull)
+
+  @@index([entidadeTipo, entidadeId, dataHora])
+  @@index([usuarioId, dataHora])
+}
+
 model HistoricoEnvioMensagem {
   id                       Int                    @id @default(autoincrement())
   cotacaoEnvioFornecedorId Int
@@ -367,4 +403,21 @@ model HistoricoEnvioMensagem {
   erro                     String?
   identificadorExterno     String?
   envio                    CotacaoEnvioFornecedor @relation(fields: [cotacaoEnvioFornecedorId], references: [id], onDelete: Restrict)
+}
+
+model HistoricoEnvioResposta {
+  id                    Int             @id @default(autoincrement())
+  cotacaoRespostaId     Int
+  usuarioId             Int
+  destinatarioId        Int?
+  destinatarioNome      String
+  telefone              String
+  mensagem              String
+  dataHora              DateTime        @default(now())
+  status                StatusEnvio
+  erro                  String?
+  identificadorExterno  String?
+  resposta              CotacaoResposta @relation(fields: [cotacaoRespostaId], references: [id], onDelete: Restrict)
+  usuario               Usuario         @relation(fields: [usuarioId], references: [id], onDelete: Restrict)
+  @@index([cotacaoRespostaId, dataHora])
 }
