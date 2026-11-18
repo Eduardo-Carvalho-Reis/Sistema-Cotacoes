@@ -8,6 +8,32 @@ const router = Router();
 const whatsapp = new WhatsAppProvider();
 const fail = (res, e) => res.status(e.code === "P2025" ? 404 : 400).json({ erro: e.message });
 
+async function concluirCompraSePronta(tx, compraId, usuarioId) {
+  const compra = await tx.compra.findUniqueOrThrow({ where: { id: compraId } });
+  if (compra.status === "CANCELADA" || compra.status === "CONCLUIDA") return;
+  const pedidos = await tx.pedidoCompra.findMany({
+    where: { compraId },
+    include: { notasFiscais: true, itens: { include: { recebimentos: true } } },
+  });
+  const todosConcluidos = pedidos.length > 0 && pedidos.every(pedido =>
+    pedido.status !== "CANCELADO"
+    && pedido.notasFiscais.length > 0
+    && pedido.itens.length > 0
+    && pedido.itens.every(item => item.recebimentos.reduce((sum, recebimento) => sum + Number(recebimento.quantidadeRecebida), 0) >= Number(item.quantidade))
+  );
+  if (!todosConcluidos) return;
+  await tx.compra.update({ where: { id: compraId }, data: { status: "CONCLUIDA" } });
+  await tx.historicoStatus.create({ data: {
+    entidadeTipo: "Compra",
+    entidadeId: compraId,
+    statusAnterior: compra.status,
+    statusNovo: "CONCLUIDA",
+    usuarioId,
+    compraId,
+    observacao: "Todos os produtos foram recebidos e as notas fiscais foram lançadas.",
+  } });
+}
+
 router.post("/cotacoes", async (req, res) => {
   try {
     const { obraId, observacao, itens, fornecedorIds } = req.body;
@@ -410,7 +436,13 @@ router.post("/pedidos/:id/notas-fiscais", async (req, res) => {
   try {
     const { numero, dataEmissao, valorTotal, arquivoReferencia } = req.body;
     if (Number(valorTotal) < 0) throw new Error("Valor não pode ser negativo.");
-    res.status(201).json(await prisma.notaFiscal.create({ data: { pedidoCompraId: Number(req.params.id), numero, dataEmissao: new Date(dataEmissao), valorTotal: Number(valorTotal), arquivoReferencia } }));
+    const result = await prisma.$transaction(async tx => {
+      const pedido = await tx.pedidoCompra.findUniqueOrThrow({ where: { id: Number(req.params.id) } });
+      const notaFiscal = await tx.notaFiscal.create({ data: { pedidoCompraId: pedido.id, numero, dataEmissao: new Date(dataEmissao), valorTotal: Number(valorTotal), arquivoReferencia } });
+      await concluirCompraSePronta(tx, pedido.compraId, req.usuario.id);
+      return notaFiscal;
+    });
+    res.status(201).json(result);
   } catch (e) { fail(res, e); }
 });
 
@@ -427,6 +459,7 @@ router.post("/pedidos/itens/:id/recebimentos", async (req, res) => {
       const iniciado = total.some(i => i.recebimentos.length);
       await tx.pedidoCompra.update({ where: { id: item.pedidoCompraId }, data: { status: concluido ? "RECEBIDO" : iniciado ? "PARCIALMENTE_RECEBIDO" : item.pedido.status } });
       await tx.historicoStatus.create({ data: { entidadeTipo: "RecebimentoItem", entidadeId: recebimento.id, statusNovo: concluido ? "RECEBIDO" : "PARCIALMENTE_RECEBIDO", usuarioId: req.usuario.id, pedidoCompraId: item.pedidoCompraId, observacao: `Recebimento de ${quantidadeRecebida}` } });
+      await concluirCompraSePronta(tx, item.pedido.compraId, req.usuario.id);
       return recebimento;
     });
     res.status(201).json(result);
@@ -463,6 +496,7 @@ router.post("/pedidos/:id/recebimentos", async (req, res) => {
       const status = concluido ? "RECEBIDO" : iniciado ? "PARCIALMENTE_RECEBIDO" : pedido.status;
       const pedidoAtualizado = await tx.pedidoCompra.update({ where: { id: pedidoId }, data: { status } });
       for (const registro of registros) await tx.historicoStatus.create({ data: { entidadeTipo: "RecebimentoItem", entidadeId: registro.id, statusNovo: status, usuarioId: req.usuario.id, pedidoCompraId: pedidoId, observacao: `Recebimento de ${registro.quantidadeRecebida}${observacao ? ` · ${observacao}` : ""}` } });
+      await concluirCompraSePronta(tx, pedido.compraId, req.usuario.id);
       return { pedido: pedidoAtualizado, recebimentos: registros };
     });
     res.status(201).json(result);
