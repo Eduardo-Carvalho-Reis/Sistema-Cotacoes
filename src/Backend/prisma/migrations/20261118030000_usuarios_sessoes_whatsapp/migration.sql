@@ -1,4 +1,4 @@
-﻿CREATE TABLE "WhatsAppSessao" (
+CREATE TABLE "WhatsAppSessao" (
   "id" SERIAL NOT NULL,
   "usuarioId" INTEGER NOT NULL,
   "nomeSessao" TEXT NOT NULL,

@@ -10,7 +10,8 @@
     "dev:frontend": "npm run dev --prefix src/Frontend",
     "start": "tsx src/Backend/server.js",
     "db:generate": "prisma generate --schema src/Backend/prisma/schema.prisma",
-    "db:migrate": "prisma migrate deploy --schema src/Backend/prisma/schema.prisma"
+    "db:migrate": "prisma migrate deploy --config src/Backend/prisma.config.ts",
+    "db:status": "prisma migrate status --config src/Backend/prisma.config.ts"
   },
   "repository": {
     "type": "git",

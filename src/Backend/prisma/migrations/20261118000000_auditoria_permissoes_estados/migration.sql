@@ -1,4 +1,4 @@
-﻿CREATE TYPE "StatusCotacaoEnvio_novo" AS ENUM ('RASCUNHO', 'ENVIADA', 'EM_ANDAMENTO', 'CONCLUIDA', 'ENCERRADA', 'CANCELADA');
+CREATE TYPE "StatusCotacaoEnvio_novo" AS ENUM ('RASCUNHO', 'ENVIADA', 'EM_ANDAMENTO', 'CONCLUIDA', 'ENCERRADA', 'CANCELADA');
 ALTER TABLE "CotacaoEnvio" ADD COLUMN "status_novo" "StatusCotacaoEnvio_novo";
 UPDATE "CotacaoEnvio" q SET "status_novo" = CASE
   WHEN q."status"::text = 'EM_ANALISE' THEN 'EM_ANDAMENTO'::"StatusCotacaoEnvio_novo"
