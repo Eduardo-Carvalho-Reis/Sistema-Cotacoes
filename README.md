@@ -26,6 +26,11 @@ API em Node.js, Express, Prisma e PostgreSQL para cadastro operacional, cotaçõ
 - `/api/notificacoes` consulta notificacoes e tentativas; o worker da API tenta novamente envios pendentes e verifica entregas proximas/atrasadas a cada minuto.
 - `/api/historico`: consulta trilha de alterações.
 
+### Backup e recuperacao PostgreSQL
+
+O script `scripts/backup-postgres.ps1` cria um dump customizado com `pg_dump` na pasta local `backups/`, ignorada pelo Git. Configure `DATABASE_URL` no ambiente do processo e execute `./scripts/backup-postgres.ps1`; mantenha credenciais fora de logs e do repositorio. Programe a rotina no Agendador de Tarefas ou no ambiente operacional e copie os dumps para armazenamento separado, com controle de acesso e retencao definidos pela empresa.
+
+Teste periodicamente a recuperacao em um banco PostgreSQL isolado e vazio, usando `pg_restore --no-owner --no-acl --dbname=<URL_DO_BANCO_DE_TESTE> <arquivo.dump>`. A restauracao em producao exige janela de manutencao, backup atual e validacao explicita. O script nao executa restauracao nem remove arquivos antigos.
 ### Integracao com WPPConnect Server
 
 1. Suba o WPPConnect Server e configure nele uma `SECRET_KEY` forte. O Swagger fica disponivel em `/api-docs` na instancia.
