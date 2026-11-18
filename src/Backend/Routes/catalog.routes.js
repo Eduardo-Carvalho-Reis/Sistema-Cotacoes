@@ -7,11 +7,12 @@ const router = Router();
 const resource = (path, model, fields, { soft = true, secret = false } = {}) => {
   const r = Router();
   const admin = (req, res) => {
-    if ((model === "usuario" || model === "perfil" || model === "obra") && !isAdminUser(req.usuario)) {
+    if ((model === "usuario" || model === "perfil") && !isAdminUser(req.usuario)) {
       res.status(403).json({ erro: "Permissão insuficiente." }); return false;
     }
     return true;
   };
+  const canWrite = (req, res) => model !== "obra" || isAdminUser(req.usuario) || (res.status(403).json({ erro: "Somente administradores podem gerenciar obras." }), false);
   r.get("/", async (req, res) => {
     try { if (!admin(req, res)) return; const where = { ativo: true, ...(model === "obra" && !isAdminUser(req.usuario) ? { id: req.usuario.obraId || -1 } : {}) }; res.json(await prisma[model].findMany({ where, orderBy: { id: "desc" }, take: Math.min(Number(req.query.limite) || 100, 500), ...(secret ? { omit: { senhaHash: true } } : {}) })); }
     catch (e) { res.status(400).json({ erro: e.message }); }
@@ -25,7 +26,7 @@ const resource = (path, model, fields, { soft = true, secret = false } = {}) => 
       const data = Object.fromEntries(fields.filter(k => req.body[k] !== undefined).map(k => [k, req.body[k]]));
       if (secret && req.body.senha) data.senhaHash = await bcrypt.hash(req.body.senha, 12);
       if (secret && !data.senhaHash) throw new Error("Senha é obrigatória.");
-      if (!admin(req, res)) return;
+      if (!admin(req, res) || !canWrite(req, res)) return;
       const row = await prisma[model].create({ data, ...(secret ? { omit: { senhaHash: true } } : {}) });
       res.status(201).json(row);
     } catch (e) { res.status(400).json({ erro: e.message }); }
@@ -34,14 +35,14 @@ const resource = (path, model, fields, { soft = true, secret = false } = {}) => 
     try {
       const data = Object.fromEntries(fields.filter(k => req.body[k] !== undefined).map(k => [k, req.body[k]]));
       if (secret && req.body.senha) data.senhaHash = await bcrypt.hash(req.body.senha, 12);
-      if (!admin(req, res)) return;
+      if (!admin(req, res) || !canWrite(req, res)) return;
       const row = await prisma[model].update({ where: { id: Number(req.params.id) }, data, ...(secret ? { omit: { senhaHash: true } } : {}) });
       res.json(row);
     } catch (e) { res.status(400).json({ erro: e.message }); }
   });
   r.delete("/:id", async (req, res) => {
     try {
-      if (!admin(req, res)) return;
+      if (!admin(req, res) || !canWrite(req, res)) return;
       const id = Number(req.params.id);
       const row = soft ? await prisma[model].update({ where: { id }, data: { ativo: false } }) : await prisma[model].delete({ where: { id } });
       res.json(secret ? { id: row.id, ativo: row.ativo } : row);

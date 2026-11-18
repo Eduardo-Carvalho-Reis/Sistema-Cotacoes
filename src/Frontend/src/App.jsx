@@ -7,7 +7,7 @@ import {
   Users, X,
 } from 'lucide-react';
 
-import { Login, Overview, Quotes, Responses, Approvals, Purchases, Catalog, Reports, Settings, WhatsApp, QuoteWizard, ResponseModal, PurchaseModal } from './pages/index.js';
+import { Login, Overview, Quotes, Responses, Approvals, Purchases, Catalog, Reports, Settings, WhatsApp, QuoteWizard, ResponseModal, PurchaseModal, QuoteManagementModal } from './pages/index.js';
 import { statusNames } from './utils/formatters.js';
 
 
@@ -96,6 +96,7 @@ function App() {
     {loading && <div className="refresh-indicator"><span></span> Atualizando dados</div>}
     {notice && <div className="toast"><CheckCircle2 size={17}/>{notice}</div>}
     {modal?.type === 'newQuote' && <QuoteWizard {...contentProps} onClose={() => setModal(null)} />}
+    {['editQuote', 'cancelQuote'].includes(modal?.type) && <QuoteManagementModal {...contentProps} quote={modal.quote} mode={modal.type === 'cancelQuote' ? 'cancel' : 'edit'} onClose={() => setModal(null)} />}
     {modal?.type === 'respond' && <ResponseModal {...contentProps} quote={modal.quote} onClose={() => setModal(null)} />}
     {modal?.type === 'purchaseAction' && <PurchaseModal {...contentProps} purchase={modal.purchase} order={modal.order} action={modal.action} onClose={() => setModal(null)} />}
   </div>;

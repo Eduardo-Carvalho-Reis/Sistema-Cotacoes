@@ -35,6 +35,7 @@ model Usuario {
   auditorias   Auditoria[]
   cotacoesCanceladas CotacaoEnvio[] @relation("CotacaoCanceladaPor")
   enviosResposta HistoricoEnvioResposta[]
+  enviosCotacao HistoricoEnvioMensagem[]
 }
 
 model WhatsAppDestinatario {
@@ -402,7 +403,9 @@ model HistoricoEnvioMensagem {
   status                   StatusEnvio
   erro                     String?
   identificadorExterno     String?
+  usuarioId                Int?
   envio                    CotacaoEnvioFornecedor @relation(fields: [cotacaoEnvioFornecedorId], references: [id], onDelete: Restrict)
+  usuario                  Usuario? @relation(fields: [usuarioId], references: [id], onDelete: SetNull)
 }
 
 model HistoricoEnvioResposta {

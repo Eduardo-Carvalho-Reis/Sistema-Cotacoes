@@ -1,5 +1,5 @@
 export { Overview } from './Overview.jsx';
-export { Quotes, QuoteWizard } from './Quotes.jsx';
+export { Quotes, QuoteWizard, QuoteManagementModal } from './Quotes.jsx';
 export { Responses, ResponseModal } from './Responses.jsx';
 export { Approvals } from './Approvals.jsx';
 export { Purchases, PurchaseModal } from './Purchases.jsx';
