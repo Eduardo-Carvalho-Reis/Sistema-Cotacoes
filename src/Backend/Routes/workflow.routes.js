@@ -48,7 +48,69 @@ router.get("/cotacoes/:id/comparativo", async (req, res) => {
 
 router.get("/compras", async (req, res) => {
   try {
-    res.json(await prisma.compra.findMany({ where: { obraId: req.query.obraId ? Number(req.query.obraId) : undefined, status: req.query.status || undefined, dataCriacao: req.query.de || req.query.ate ? { gte: req.query.de ? new Date(req.query.de) : undefined, lte: req.query.ate ? new Date(req.query.ate) : undefined } : undefined }, include: { obra: true, cotacao: true, selecoes: { include: { oferta: { include: { resposta: { include: { fornecedor: true } }, produto: true } }, aprovador: { select: { nome: true } } } }, pedidos: { include: { fornecedor: true, itens: { include: { recebimentos: true }, }, notasFiscais: true } } }, orderBy: { dataCriacao: "desc" } }));
+    res.json(await prisma.compra.findMany({
+      where: {
+        obraId: req.query.obraId ? Number(req.query.obraId) : undefined,
+        status: req.query.status || undefined,
+        dataCriacao: req.query.de || req.query.ate ? { gte: req.query.de ? new Date(req.query.de) : undefined, lte: req.query.ate ? new Date(req.query.ate) : undefined } : undefined,
+      },
+      include: {
+        obra: true,
+        cotacao: true,
+        selecoes: { include: { oferta: { include: { resposta: { include: { fornecedor: true } }, produto: true, itemSolicitado: { include: { aplicacao: true } } } }, aprovador: { select: { nome: true } } } },
+        pedidos: {
+          include: {
+            fornecedor: true,
+            itens: { include: { recebimentos: true, selecao: { include: { oferta: { include: { produto: true } } } } } },
+            notasFiscais: true,
+          },
+        },
+      },
+      orderBy: { dataCriacao: "desc" },
+    }));
+  } catch (e) { fail(res, e); }
+});
+
+router.post("/compras/:id/cancelar", permitir("ADMINISTRADOR", "ADMINISTRADOR_SISTEMA"), async (req, res) => {
+  try {
+    const compraId = Number(req.params.id);
+    const observacaoCancelamento = String(req.body.observacaoCancelamento || "").trim();
+    if (!observacaoCancelamento) throw new Error("Informe a observação do cancelamento.");
+    const result = await prisma.$transaction(async tx => {
+      const compra = await tx.compra.findUniqueOrThrow({ where: { id: compraId } });
+      if (compra.status === "CANCELADA") throw new Error("Esta compra já está cancelada.");
+      const atualizada = await tx.compra.update({ where: { id: compraId }, data: { status: "CANCELADA", observacaoCancelamento } });
+      const pedidos = await tx.pedidoCompra.findMany({ where: { compraId } });
+      await tx.pedidoCompra.updateMany({ where: { compraId, status: { not: "CANCELADO" } }, data: { status: "CANCELADO" } });
+      await tx.historicoStatus.create({ data: { entidadeTipo: "Compra", entidadeId: compraId, statusAnterior: compra.status, statusNovo: "CANCELADA", usuarioId: req.usuario.id, compraId, observacao: observacaoCancelamento } });
+      for (const pedido of pedidos) if (pedido.status !== "CANCELADO") await tx.historicoStatus.create({ data: { entidadeTipo: "PedidoCompra", entidadeId: pedido.id, statusAnterior: pedido.status, statusNovo: "CANCELADO", usuarioId: req.usuario.id, pedidoCompraId: pedido.id, observacao: observacaoCancelamento } });
+      return atualizada;
+    });
+    res.json(result);
+  } catch (e) { fail(res, e); }
+});
+
+router.delete("/compras/:id", permitir("ADMINISTRADOR", "ADMINISTRADOR_SISTEMA"), async (req, res) => {
+  try {
+    const compraId = Number(req.params.id);
+    await prisma.$transaction(async tx => {
+      const compra = await tx.compra.findUniqueOrThrow({ where: { id: compraId } });
+      if (compra.status !== "CANCELADA") throw new Error("A compra precisa estar cancelada antes de ser apagada.");
+      const pedidos = await tx.pedidoCompra.findMany({ where: { compraId }, select: { id: true } });
+      const pedidoIds = pedidos.map(pedido => pedido.id);
+      const itensPedido = pedidoIds.length ? await tx.pedidoCompraItem.findMany({ where: { pedidoCompraId: { in: pedidoIds } }, select: { id: true } }) : [];
+      const itemIds = itensPedido.map(item => item.id);
+      await tx.historicoStatus.deleteMany({ where: { OR: [{ compraId }, { pedidoCompraId: { in: pedidoIds } }] } });
+      if (itemIds.length) await tx.recebimentoItem.deleteMany({ where: { pedidoCompraItemId: { in: itemIds } } });
+      if (pedidoIds.length) {
+        await tx.notaFiscal.deleteMany({ where: { pedidoCompraId: { in: pedidoIds } } });
+        await tx.pedidoCompraItem.deleteMany({ where: { pedidoCompraId: { in: pedidoIds } } });
+        await tx.pedidoCompra.deleteMany({ where: { id: { in: pedidoIds } } });
+      }
+      await tx.selecaoCompraItem.deleteMany({ where: { compraId } });
+      await tx.compra.delete({ where: { id: compraId } });
+    });
+    res.status(204).send();
   } catch (e) { fail(res, e); }
 });
 
@@ -366,6 +428,42 @@ router.post("/pedidos/itens/:id/recebimentos", async (req, res) => {
       await tx.pedidoCompra.update({ where: { id: item.pedidoCompraId }, data: { status: concluido ? "RECEBIDO" : iniciado ? "PARCIALMENTE_RECEBIDO" : item.pedido.status } });
       await tx.historicoStatus.create({ data: { entidadeTipo: "RecebimentoItem", entidadeId: recebimento.id, statusNovo: concluido ? "RECEBIDO" : "PARCIALMENTE_RECEBIDO", usuarioId: req.usuario.id, pedidoCompraId: item.pedidoCompraId, observacao: `Recebimento de ${quantidadeRecebida}` } });
       return recebimento;
+    });
+    res.status(201).json(result);
+  } catch (e) { fail(res, e); }
+});
+
+router.post("/pedidos/:id/recebimentos", async (req, res) => {
+  try {
+    const pedidoId = Number(req.params.id);
+    const { itens, dataRecebimento, observacao } = req.body;
+    if (!Array.isArray(itens) || !itens.length) throw new Error("Informe os produtos recebidos.");
+    const data = dataRecebimento ? new Date(`${dataRecebimento}T12:00:00`) : new Date();
+    if (Number.isNaN(data.getTime())) throw new Error("Informe uma data de recebimento válida.");
+
+    const result = await prisma.$transaction(async tx => {
+      const pedido = await tx.pedidoCompra.findUniqueOrThrow({ where: { id: pedidoId }, include: { itens: { include: { recebimentos: true } } } });
+      if (pedido.status === "CANCELADO") throw new Error("Não é possível registrar recebimento de um pedido cancelado.");
+      const ids = itens.map(item => Number(item.pedidoCompraItemId));
+      if (new Set(ids).size !== ids.length || ids.some(id => !pedido.itens.some(item => item.id === id))) throw new Error("Há produtos inválidos ou repetidos neste recebimento.");
+
+      const registros = [];
+      for (const entrada of itens) {
+        const item = pedido.itens.find(row => row.id === Number(entrada.pedidoCompraItemId));
+        const quantidade = Number(entrada.quantidadeRecebida);
+        const jaRecebida = item.recebimentos.reduce((sum, registro) => sum + Number(registro.quantidadeRecebida), 0);
+        if (!Number.isFinite(quantidade) || quantidade < 0 || jaRecebida + quantidade > Number(item.quantidade)) throw new Error("Uma das quantidades recebidas é inválida ou maior que o saldo do pedido.");
+        const registro = await tx.recebimentoItem.create({ data: { pedidoCompraItemId: item.id, quantidadeRecebida: quantidade, dataRecebimento: data, usuarioId: req.usuario.id, observacao } });
+        registros.push(registro);
+      }
+
+      const atualizados = await tx.pedidoCompraItem.findMany({ where: { pedidoCompraId: pedidoId }, include: { recebimentos: true } });
+      const concluido = atualizados.every(item => item.recebimentos.reduce((sum, registro) => sum + Number(registro.quantidadeRecebida), 0) >= Number(item.quantidade));
+      const iniciado = atualizados.some(item => item.recebimentos.length > 0);
+      const status = concluido ? "RECEBIDO" : iniciado ? "PARCIALMENTE_RECEBIDO" : pedido.status;
+      const pedidoAtualizado = await tx.pedidoCompra.update({ where: { id: pedidoId }, data: { status } });
+      for (const registro of registros) await tx.historicoStatus.create({ data: { entidadeTipo: "RecebimentoItem", entidadeId: registro.id, statusNovo: status, usuarioId: req.usuario.id, pedidoCompraId: pedidoId, observacao: `Recebimento de ${registro.quantidadeRecebida}${observacao ? ` · ${observacao}` : ""}` } });
+      return { pedido: pedidoAtualizado, recebimentos: registros };
     });
     res.status(201).json(result);
   } catch (e) { fail(res, e); }

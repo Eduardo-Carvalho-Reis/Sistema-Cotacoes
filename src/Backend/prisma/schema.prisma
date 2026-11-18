@@ -243,6 +243,7 @@ model Compra {
   cotacaoEnvioId Int                 @unique
   dataCriacao    DateTime            @default(now())
   status         StatusCompra        @default(APROVACAO)
+  observacaoCancelamento String?
   obra           Obra                @relation(fields: [obraId], references: [id], onDelete: Restrict)
   cotacao        CotacaoEnvio        @relation(fields: [cotacaoEnvioId], references: [id], onDelete: Restrict)
   selecoes       SelecaoCompraItem[]

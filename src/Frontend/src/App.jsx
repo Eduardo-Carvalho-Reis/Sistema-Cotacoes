@@ -85,7 +85,7 @@ function App() {
         {page === 'quotes' && <Quotes {...contentProps} />}
         {page === 'responses' && <Responses {...contentProps} />}
         {page === 'approval' && <Approvals {...contentProps} user={user} />}
-        {page === 'purchases' && <Purchases {...contentProps} />}
+        {page === 'purchases' && <Purchases {...contentProps} user={user} />}
         {page === 'catalog' && <Catalog {...contentProps} />}
         {page === 'reports' && <Reports {...contentProps} />}
         {page === 'settings' && <Settings user={user} go={go} />}

@@ -1,0 +1,1 @@
+ALTER TABLE "Compra" ADD COLUMN "observacaoCancelamento" TEXT;
