@@ -163,9 +163,36 @@ router.delete("/respostas/:respostaId/itens/:itemId", async (req, res) => {
 
 router.post("/respostas/:id/encaminhar", async (req, res) => {
   try {
-    const row = await prisma.cotacaoResposta.update({ where: { id: Number(req.params.id) }, data: { status: "ENCAMINHADA", dataResposta: new Date() }, include: { cotacao: true } });
-    await prisma.cotacaoEnvio.update({ where: { id: row.cotacaoEnvioId }, data: { status: "EM_ANALISE" } });
-    res.json(row);
+    const respostaId = Number(req.params.id);
+    const current = await prisma.cotacaoResposta.findUniqueOrThrow({ where: { id: respostaId }, include: { fornecedor: true, cotacao: { include: { obra: true } }, itens: { include: { produto: true } } } });
+    if (current.status !== "PREENCHIMENTO") throw new Error("Esta resposta já foi encaminhada.");
+    const destinatarios = await prisma.whatsAppDestinatario.findMany({ where: { usuarioId: req.usuario.id, ativo: true }, orderBy: { nome: "asc" } });
+    if (!destinatarios.length) throw new Error("Cadastre ao menos um número ou grupo em WhatsApp antes de encaminhar a resposta.");
+
+    const brl = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" });
+    const linhasItens = current.itens.map(item => item.indisponivel
+      ? `• ${item.produto.nome}: indisponível`
+      : `• ${item.produto.nome}: ${Number(item.quantidadeOfertada)} ${item.produto.unidade} × ${brl.format(Number(item.valorUnitario))} = ${brl.format(Number(item.quantidadeOfertada) * Number(item.valorUnitario))}`);
+    const mensagem = [
+      `Resposta da cotação #${String(current.cotacaoEnvioId).padStart(4, "0")}`,
+      `Obra: ${current.cotacao.obra.nome}`,
+      `Fornecedor: ${current.fornecedor.nome}`,
+      ...linhasItens,
+      current.observacao ? `Observação: ${current.observacao}` : null,
+    ].filter(Boolean).join("\n");
+    const envios = await Promise.all(destinatarios.map(async destinatario => {
+      try {
+        await whatsapp.enviar({ telefone: destinatario.identificador, mensagem });
+        return { nome: destinatario.nome, enviado: true };
+      } catch (error) { return { nome: destinatario.nome, enviado: false, erro: error.message }; }
+    }));
+    const enviados = envios.filter(item => item.enviado);
+    const falhas = envios.filter(item => !item.enviado);
+    if (!enviados.length) return res.status(502).json({ erro: `Não foi possível enviar a resposta por WhatsApp: ${falhas.map(item => `${item.nome}: ${item.erro}`).join("; ")}` });
+
+    const resposta = await prisma.cotacaoResposta.update({ where: { id: respostaId }, data: { status: "ENCAMINHADA", dataResposta: new Date() }, include: { cotacao: true } });
+    await prisma.cotacaoEnvio.update({ where: { id: resposta.cotacaoEnvioId }, data: { status: "EM_ANALISE" } });
+    res.json({ resposta, whatsapp: { enviados: enviados.map(item => item.nome), falhas: falhas.map(({ nome, erro }) => ({ nome, erro })) } });
   } catch (e) { fail(res, e); }
 });
 

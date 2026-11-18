@@ -9,14 +9,20 @@ import {
 
 import { money, date, statusNames } from '../utils/formatters.js';
 import { PageTitle, Button, Badge, Empty, Stat } from '../components/index.js';
+import { SearchableSelect } from './Quotes.jsx';
 import './Responses.css';
 
 function Responses({ data, setModal, go }) {
   const [expandedQuoteId, setExpandedQuoteId] = useState(null);
   const [workId, setWorkId] = useState('');
   const [supplierId, setSupplierId] = useState('');
+  const [quoteId, setQuoteId] = useState('');
+  const workOptions = useMemo(() => [...data.works].sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR', { sensitivity: 'base' })), [data.works]);
+  const supplierOptions = useMemo(() => [...data.suppliers].sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR', { sensitivity: 'base' })), [data.suppliers]);
+  const quoteOptions = useMemo(() => data.quotes.filter(quote => quote.fornecedores?.length).sort((a, b) => b.id - a.id), [data.quotes]);
   const quotes = data.quotes.filter(quote =>
     quote.fornecedores?.length
+    && (!quoteId || String(quote.id) === quoteId)
     && (!workId || String(quote.obraId) === workId)
     && (!supplierId || quote.fornecedores.some(item => String(item.fornecedorId) === supplierId))
   );
@@ -34,8 +40,9 @@ function Responses({ data, setModal, go }) {
     <PageTitle eyebrow="RETORNO DOS FORNECEDORES" title="Respostas" description="Acompanhe as respostas agrupadas por cotação e registre as propostas recebidas." action={<div className="title-pill"><MessageCircle size={16}/> {totalRegistered} registradas</div>}/>
     <div className="tip-banner"><div className="tip-mark"><MessageCircle size={18}/></div><div><b>As respostas chegam por aqui</b><span>Abra uma cotação para ver os fornecedores e registrar valores, disponibilidade e itens extras.</span></div></div>
     <div className="toolbar response-filters">
-      <label className="select-wrap"><Building2 size={15}/><select aria-label="Filtrar por obra" value={workId} onChange={event => setWorkId(event.target.value)}><option value="">Todas as obras</option>{data.works.map(work => <option key={work.id} value={work.id}>{work.nome}</option>)}</select></label>
-      <label className="select-wrap"><Users size={15}/><select aria-label="Filtrar por fornecedor" value={supplierId} onChange={event => setSupplierId(event.target.value)}><option value="">Todos os fornecedores</option>{data.suppliers.map(supplier => <option key={supplier.id} value={supplier.id}>{supplier.nome}</option>)}</select></label>
+      <SearchableSelect className="response-filter-select" options={workOptions} value={workId} onChange={setWorkId} placeholder="Filtrar por obra" getLabel={work => work.nome} clearLabel="Todas as obras"/>
+      <SearchableSelect className="response-filter-select" options={supplierOptions} value={supplierId} onChange={setSupplierId} placeholder="Filtrar por fornecedor" getLabel={supplier => supplier.nome} clearLabel="Todos os fornecedores"/>
+      <SearchableSelect className="response-filter-select" options={quoteOptions} value={quoteId} onChange={setQuoteId} placeholder="Filtrar por cotação" getLabel={quote => `Cotação #${String(quote.id).padStart(4, '0')} · ${quote.obra?.nome || 'Obra'}`} clearLabel="Todas as cotações"/>
     </div>
     <div className="panel table-panel">
       <div className="panel-heading table-heading"><div><span className="eyebrow">ACOMPANHAMENTO</span><h2>Cotações</h2></div><span className="result-count">{totalPending} aguardando preenchimento</span></div>
@@ -68,6 +75,10 @@ function Responses({ data, setModal, go }) {
 
 function ResponseModal({ quote, supplierId: initialSupplierId, data, api, refresh, notify, onClose }) {
   const [supplierId, setSupplierId] = useState(String(initialSupplierId || quote.fornecedores?.[0]?.fornecedorId || ''));
+  const [showNewProduct, setShowNewProduct] = useState(false);
+  const [newProductRowKey, setNewProductRowKey] = useState(null);
+  const [newProduct, setNewProduct] = useState({ nome: '', referencia: '', unidade: 'UN', precoAtual: '' });
+  const [savingProduct, setSavingProduct] = useState(false);
   const existing = quote.respostas?.find(r => r.fornecedorId === Number(supplierId));
   const [rows, setRows] = useState([]); const [note, setNote] = useState(''); const [saved, setSaved] = useState(null); const [saving, setSaving] = useState(false);
   useEffect(() => {
@@ -79,6 +90,21 @@ function ResponseModal({ quote, supplierId: initialSupplierId, data, api, refres
   }, [quote, supplierId]);
   const update = (key, field, value) => setRows(v => v.map(r => r.key === key ? { ...r, [field]: value } : r));
   const addExtra = () => setRows(v => [...v, { key: `extra-${Date.now()}`, produtoId: '', quantidadeOfertada: '', valorUnitario: '', indisponivel: false, adicional: true }]);
+  const createProduct = async event => {
+    event.preventDefault();
+    setSavingProduct(true);
+    try {
+      const body = { nome: newProduct.nome.trim(), unidade: newProduct.unidade.trim() || 'UN' };
+      if (newProduct.referencia.trim()) body.referencia = newProduct.referencia.trim();
+      if (newProduct.precoAtual !== '') body.precoAtual = Number(newProduct.precoAtual);
+      const product = await api('/produto', { method: 'POST', body: JSON.stringify(body) });
+      await refresh();
+      setRows(current => current.map(row => row.key === newProductRowKey ? { ...row, produtoId: String(product.id) } : row));
+      setNewProduct({ nome: '', referencia: '', unidade: 'UN', precoAtual: '' });
+      setShowNewProduct(false);
+      notify('Produto cadastrado e selecionado.');
+    } catch (error) { notify(error.message); } finally { setSavingProduct(false); }
+  };
   const save = async () => {
     if (!supplierId) return notify('Selecione o fornecedor.');
     const items = rows.filter(r => !r.adicional || r.produtoId);
@@ -98,8 +124,8 @@ function ResponseModal({ quote, supplierId: initialSupplierId, data, api, refres
       setSaved(response); await refresh(); notify('Resposta salva como rascunho.');
     } catch (e) { notify(e.message); } finally { setSaving(false); }
   };
-  const forward = async () => { const id = saved?.id || existing?.id; if (!id) return notify('Salve a resposta antes de encaminhar.'); try { await api(`/api/respostas/${id}/encaminhar`, { method: 'POST' }); await refresh(); notify('Resposta encaminhada para análise administrativa.'); onClose(); } catch (e) { notify(e.message); } };
-  return <div className="modal-backdrop"><div className="modal response-modal"><div className="modal-head"><div><span className="eyebrow">COTAÇÃO #{String(quote.id).padStart(4, '0')} · {quote.obra?.nome}</span><h2>Registrar resposta</h2></div><button className="icon-button" onClick={onClose}><X size={19}/></button></div><div className="modal-content"><label className="field-label">Fornecedor<select value={supplierId} onChange={e => setSupplierId(e.target.value)}>{quote.fornecedores?.map(p => <option key={p.fornecedorId} value={p.fornecedorId}>{p.fornecedor?.nome}</option>)}</select></label><div className="response-items-head"><span>PRODUTO SOLICITADO</span><span>QTD. OFERTADA</span><span>VALOR UNITÁRIO</span><span>INDISPONÍVEL</span></div><div className="response-items">{rows.map(r => <div className={`response-item-row ${r.adicional ? 'extra-row' : ''}`} key={r.key}><div className="response-product"><b>{r.adicional ? <select value={r.produtoId} onChange={e => update(r.key, 'produtoId', e.target.value)}><option value="">Produto adicional</option>{data.products.map(p => <option key={p.id} value={p.id}>{p.nome}</option>)}</select> : r.nome}</b>{r.adicional ? <small>Item adicional</small> : <small>Solicitado: {r.solicitada} {r.unidade}</small>}</div><input type="number" min="0" step="0.001" disabled={r.indisponivel} value={r.indisponivel ? 0 : r.quantidadeOfertada} onChange={e => update(r.key, 'quantidadeOfertada', e.target.value)}/><div className="money-input"><span>R$</span><input type="number" min="0" step="0.01" disabled={r.indisponivel} value={r.indisponivel ? 0 : r.valorUnitario} onChange={e => update(r.key, 'valorUnitario', e.target.value)}/></div><label className="switch-label"><input type="checkbox" checked={r.indisponivel} onChange={e => update(r.key, 'indisponivel', e.target.checked)}/><span></span></label></div>)}</div><button className="add-extra-button" onClick={addExtra}><Plus size={15}/> Adicionar produto extra</button><label className="field-label">Observação da proposta<textarea rows="2" placeholder="Prazo, condições ou outras informações" value={note} onChange={e => setNote(e.target.value)}/></label></div><div className="modal-foot"><span className="step-caption">{existing ? 'Rascunho da resposta' : 'Preenchimento manual'}</span><div><Button variant="secondary" disabled={saving} onClick={save}><Check size={15}/>{saving ? 'Salvando...' : 'Salvar rascunho'}</Button><Button disabled={!saved && !existing} onClick={forward}>Encaminhar <ArrowRight size={16}/></Button></div></div></div></div>;
+  const forward = async () => { const id = saved?.id || existing?.id; if (!id) return notify('Salve a resposta antes de encaminhar.'); try { const result = await api(`/api/respostas/${id}/encaminhar`, { method: 'POST' }); await refresh(); const failures = result.whatsapp?.falhas || []; notify(failures.length ? `Resposta encaminhada. Falha no WhatsApp para: ${failures.map(item => item.nome).join(', ')}.` : `Resposta encaminhada e enviada para ${result.whatsapp?.enviados?.length || 0} destinatário(s) no WhatsApp.`); onClose(); } catch (e) { notify(e.message); } };
+  return <div className="modal-backdrop"><div className="modal response-modal"><div className="modal-head"><div><span className="eyebrow">COTAÇÃO #{String(quote.id).padStart(4, '0')} · {quote.obra?.nome}</span><h2>Registrar resposta</h2></div><button className="icon-button" onClick={onClose}><X size={19}/></button></div><div className="modal-content"><label className="field-label">Fornecedor<select value={supplierId} onChange={e => setSupplierId(e.target.value)}>{quote.fornecedores?.map(p => <option key={p.fornecedorId} value={p.fornecedorId}>{p.fornecedor?.nome}</option>)}</select></label><div className="response-items-head"><span>PRODUTO SOLICITADO</span><span>QTD. OFERTADA</span><span>VALOR UNITÁRIO</span><span>INDISPONÍVEL / AÇÕES</span></div><div className="response-items">{rows.map(r => <div className={`response-item-row ${r.adicional ? 'extra-row' : ''}`} key={r.key}><div className="response-product"><b>{r.adicional ? <SearchableSelect className="response-extra-product" options={data.products.filter(product => product.ativo !== false).sort((a, b) => a.nome.localeCompare(b.nome, 'pt-BR', { sensitivity: 'base' }))} value={r.produtoId} onChange={value => update(r.key, 'produtoId', value)} placeholder="Produto adicional" getLabel={product => product.nome} createLabel="Novo produto" onCreate={() => { setNewProductRowKey(r.key); setShowNewProduct(true); }}/> : r.nome}</b>{!r.adicional && <small>Solicitado: {r.solicitada} {r.unidade}</small>}</div><input type="number" min="0" step="0.001" disabled={r.indisponivel} value={r.indisponivel ? 0 : r.quantidadeOfertada} onChange={e => update(r.key, 'quantidadeOfertada', e.target.value)}/><div className="money-input"><span>R$</span><input type="number" min="0" step="0.01" disabled={r.indisponivel} value={r.indisponivel ? 0 : r.valorUnitario} onChange={e => update(r.key, 'valorUnitario', e.target.value)}/></div><div className="response-row-controls"><label className="switch-label" title="Indisponível"><input type="checkbox" checked={r.indisponivel} onChange={e => update(r.key, 'indisponivel', e.target.checked)}/><span></span></label>{r.adicional && <button type="button" className="icon-button remove-extra-button" title="Remover produto adicional" aria-label="Remover produto adicional" onClick={() => setRows(current => current.filter(row => row.key !== r.key))}><X size={15}/></button>}</div></div>)}</div><button className="add-extra-button" onClick={addExtra}><Plus size={15}/> Adicionar produto extra</button><label className="field-label">Observação da proposta<textarea rows="2" placeholder="Prazo, condições ou outras informações" value={note} onChange={e => setNote(e.target.value)}/></label></div><div className="modal-foot"><span className="step-caption">{existing ? 'Rascunho da resposta' : 'Preenchimento manual'}</span><div><Button variant="secondary" disabled={saving} onClick={save}><Check size={15}/>{saving ? 'Salvando...' : 'Salvar rascunho'}</Button><Button disabled={!saved && !existing} onClick={forward}>Encaminhar <ArrowRight size={16}/></Button></div></div>{showNewProduct && <div className="modal-backdrop product-create-backdrop" onMouseDown={event => event.target === event.currentTarget && setShowNewProduct(false)}><form className="modal new-product-modal" onSubmit={createProduct}><div className="modal-head"><div><span className="eyebrow">CADASTRO RÁPIDO</span><h2>Novo produto</h2></div><button type="button" className="icon-button" onClick={() => setShowNewProduct(false)}><X size={19}/></button></div><div className="modal-content"><label className="field-label">Nome do produto<input required autoFocus value={newProduct.nome} onChange={event => setNewProduct(current => ({ ...current, nome: event.target.value }))}/></label><div className="form-two"><label className="field-label">Unidade<input value={newProduct.unidade} onChange={event => setNewProduct(current => ({ ...current, unidade: event.target.value }))}/></label><label className="field-label">Referência<input value={newProduct.referencia} onChange={event => setNewProduct(current => ({ ...current, referencia: event.target.value }))}/></label></div><label className="field-label">Preço de referência<input type="number" min="0" step="0.01" value={newProduct.precoAtual} onChange={event => setNewProduct(current => ({ ...current, precoAtual: event.target.value }))}/></label></div><div className="modal-foot"><button type="button" className="button secondary" onClick={() => setShowNewProduct(false)}>Cancelar</button><Button type="submit" disabled={savingProduct}>{savingProduct ? 'Salvando...' : 'Cadastrar produto'}</Button></div></form></div>}</div></div>;
 }
 
 export { Responses, ResponseModal };

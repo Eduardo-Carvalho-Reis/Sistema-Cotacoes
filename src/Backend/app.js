@@ -4,6 +4,7 @@ import routerProdutos from './Routes/produto.routes.js';
 import authRoutes from './Routes/auth.routes.js';
 import catalogRoutes from './Routes/catalog.routes.js';
 import workflowRoutes from './Routes/workflow.routes.js';
+import whatsappRoutes from './Routes/whatsapp.routes.js';
 import { autenticar } from './middleware/auth.js';
 
 const app = express();
@@ -22,6 +23,7 @@ app.use('/produto',routerProdutos);
 // rotas de fornecedor
 app.use('/fornecedor',routerFornecedos);
 app.use('/api/catalogos', catalogRoutes);
+app.use('/api/whatsapp', whatsappRoutes);
 app.use('/api', workflowRoutes);
 
 

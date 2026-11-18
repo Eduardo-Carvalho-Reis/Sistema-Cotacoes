@@ -3,8 +3,9 @@ export class WhatsAppProvider {
     const url = process.env.WHATSAPP_PROVIDER_URL;
     if (!url) throw new Error("Provedor WhatsApp nao configurado.");
 
-    const phone = String(telefone || "").replace(/\D/g, "");
-    if (!phone) throw new Error("O fornecedor nao tem um telefone valido cadastrado.");
+    const rawTarget = String(telefone || "").trim();
+    const phone = rawTarget.includes("@g.us") ? rawTarget : rawTarget.replace(/\D/g, "");
+    if (!phone) throw new Error("O destinatário não tem um telefone ou ID de grupo válido.");
 
     const response = await fetch(url, {
       method: "POST",
