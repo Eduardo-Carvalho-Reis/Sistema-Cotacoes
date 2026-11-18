@@ -7,7 +7,7 @@ import {
   Users, X,
 } from 'lucide-react';
 
-import { Login, Overview, Quotes, Responses, Approvals, Purchases, Catalog, Reports, Settings, WhatsApp, QuoteWizard, ResponseModal, PurchaseModal, QuoteManagementModal } from './pages/index.js';
+import { Login, Overview, Quotes, Responses, Approvals, Purchases, Catalog, Reports, Settings, WhatsApp, QuoteWizard, ResponseModal, PurchaseModal, QuoteManagementModal, UsersAdmin } from './pages/index.js';
 import { statusNames } from './utils/formatters.js';
 
 
@@ -65,8 +65,10 @@ function App() {
 
   const bootstrap = async (nome, email, senha) => { try { await api('/auth/bootstrap', { method: 'POST', body: JSON.stringify({ nome, email, senha }) }); return true; } catch (e) { return e.message; } };
   if (!token || !user) return <Login onLogin={signIn} onBootstrap={bootstrap} />;
+  const perfil = typeof user.perfil === 'string' ? user.perfil : user.perfil?.nome;
+  const admin = ['ADMINISTRADOR', 'ADMINISTRADOR_SISTEMA'].includes(perfil);
   const nav = [
-    { title: 'WORKSPACE', items: [{ id: 'overview', label: 'Visão geral', icon: LayoutDashboard }, { id: 'quotes', label: 'Cotações', icon: ClipboardList, count: data.quotes.filter(q => !['ENCERRADA', 'CANCELADA'].includes(q.status)).length }, { id: 'responses', label: 'Respostas', icon: MessageCircle }, { id: 'approval', label: 'Aprovações', icon: BadgeCheck }, { id: 'purchases', label: 'Pedidos e compras', icon: ShoppingCart }] },
+    { title: 'WORKSPACE', items: [{ id: 'overview', label: 'Visão geral', icon: LayoutDashboard }, { id: 'quotes', label: 'Cotações', icon: ClipboardList, count: data.quotes.filter(q => !['ENCERRADA', 'CANCELADA'].includes(q.status)).length }, { id: 'responses', label: 'Respostas', icon: MessageCircle }, { id: 'approval', label: 'Aprovações', icon: BadgeCheck }, { id: 'purchases', label: 'Pedidos e compras', icon: ShoppingCart }, ...(admin ? [{ id: 'users', label: 'Usuários', icon: Users }] : [])] },
   ];
   const settingsPages = { settings: 'Configurações', catalog: 'Cadastros', whatsapp: 'WhatsApp', reports: 'Relatórios' };
   const activeLabel = nav.flatMap(n => n.items).find(i => i.id === page)?.label || settingsPages[page] || 'Visão geral';
@@ -90,6 +92,7 @@ function App() {
         {page === 'reports' && <Reports {...contentProps} />}
         {page === 'settings' && <Settings user={user} go={go} />}
         {page === 'whatsapp' && <WhatsApp {...contentProps} />}
+        {page === 'users' && admin && <UsersAdmin {...contentProps} />}
       </div>
       <footer className="footer"><span>ORBE · Gestão de compras</span><span>Fluxos claros. Compras sob controle.</span></footer>
     </main>

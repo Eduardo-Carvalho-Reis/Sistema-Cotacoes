@@ -258,7 +258,7 @@ router.post("/cotacoes/:id/enviar", async (req, res) => {
         "Aguardamos seu retorno!",
       ].join("\n");
       let status = "ENVIADO", erro = null, identificadorExterno = null;
-      try { ({ identificadorExterno } = await whatsapp.enviar({ telefone: p.fornecedor.telefone, mensagem, idempotencia: `cotacao-${c.id}-fornecedor-${p.fornecedorId}` })); }
+      try { ({ identificadorExterno } = await whatsapp.enviar({ telefone: p.fornecedor.telefone, mensagem, usuarioId: req.usuario.id, idempotencia: `cotacao-${c.id}-fornecedor-${p.fornecedorId}` })); }
       catch (e) { status = "FALHOU"; erro = e.message; }
       await prisma.$transaction([prisma.cotacaoEnvioFornecedor.update({ where: { id: p.id }, data: { statusEnvio: status, dataEnvio: status === "ENVIADO" ? new Date() : undefined, erro, identificadorExterno, telefone: p.fornecedor.telefone } }), prisma.historicoEnvioMensagem.create({ data: { cotacaoEnvioFornecedorId: p.id, telefone: p.fornecedor.telefone || "", mensagem, status, erro, identificadorExterno, usuarioId: req.usuario.id } })]);
       return { fornecedorId: p.fornecedorId, status, erro };
@@ -397,7 +397,7 @@ router.post("/respostas/:id/encaminhar", async (req, res) => {
     ].filter(Boolean).join("\n");
     const envios = await Promise.all(destinatarios.map(async destinatario => {
       try {
-        const { identificadorExterno } = await whatsapp.enviar({ telefone: destinatario.identificador, mensagem });
+        const { identificadorExterno } = await whatsapp.enviar({ telefone: destinatario.identificador, mensagem, usuarioId: req.usuario.id });
         return { destinatario, identificadorExterno, status: "ENVIADO", erro: null };
       } catch (error) { return { destinatario, status: "FALHOU", erro: error.message, identificadorExterno: null }; }
     }));
@@ -539,7 +539,7 @@ router.post("/compras/aprovar", permitir("ADMINISTRADOR", "ADMINISTRADOR_SISTEMA
       ].join("\n");
 
       try {
-        const { identificadorExterno } = await whatsapp.enviar({ telefone: fornecedor.telefone, mensagem });
+        const { identificadorExterno } = await whatsapp.enviar({ telefone: fornecedor.telefone, mensagem, usuarioId: req.usuario.id });
         return { fornecedorId: fornecedor.id, status: "ENVIADO", identificadorExterno };
       } catch (erro) {
         return { fornecedorId: fornecedor.id, status: "FALHOU", erro: erro.message };

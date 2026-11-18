@@ -1,5 +1,11 @@
+import { wppConnectSessions } from "./wppconnect-session.service.js";
+
 export class WhatsAppProvider {
-  async enviar({ telefone, mensagem }) {
+  async enviar({ telefone, mensagem, usuarioId }) {
+    if (usuarioId) {
+      const sent = await wppConnectSessions.enviar(usuarioId, { telefone, mensagem });
+      if (sent) return sent;
+    }
     const url = process.env.WHATSAPP_PROVIDER_URL;
     if (!url) throw new Error("Provedor WhatsApp nao configurado.");
 

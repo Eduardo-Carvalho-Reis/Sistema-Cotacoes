@@ -40,6 +40,7 @@ model Usuario {
   enviosResposta HistoricoEnvioResposta[]
   enviosCotacao HistoricoEnvioMensagem[]
   historicosNotaFiscal HistoricoNotaFiscal[]
+  sessaoWhatsApp WhatsAppSessao?
 }
 
 model WhatsAppDestinatario {
@@ -55,6 +56,19 @@ model WhatsAppDestinatario {
 
   @@unique([usuarioId, identificador])
   @@index([usuarioId, ativo, tipo])
+}
+
+model WhatsAppSessao {
+  id                 Int      @id @default(autoincrement())
+  usuarioId          Int      @unique
+  nomeSessao         String   @unique
+  tokenCriptografado String?
+  status             String   @default("DESCONECTADO")
+  telefoneConectado  String?
+  atualizadoStatusEm DateTime?
+  criadoEm           DateTime @default(now())
+  atualizadoEm       DateTime @updatedAt
+  usuario            Usuario  @relation(fields: [usuarioId], references: [id], onDelete: Cascade)
 }
 
 model Obra {

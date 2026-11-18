@@ -27,9 +27,9 @@ API em Node.js, Express, Prisma e PostgreSQL para cadastro operacional, cotaçõ
 ### Integracao com WPPConnect Server
 
 1. Suba o WPPConnect Server e configure nele uma `SECRET_KEY` forte. O Swagger fica disponivel em `/api-docs` na instancia.
-2. Gere um token para a sessao com `POST http://localhost:21465/api/minha-sessao/<SECRET_KEY>/generate-token` e guarde o campo `full` da resposta.
-3. Inicie a sessao com `POST http://localhost:21465/api/minha-sessao/start-session`, usando `Authorization: Bearer <TOKEN_FULL>`. Obtenha o QR Code e escaneie-o pelo WhatsApp do numero remetente.
-4. No `.env` da raiz, configure `WHATSAPP_PROVIDER_URL=http://localhost:21465/api/minha-sessao/send-message` e `WHATSAPP_PROVIDER_TOKEN=<TOKEN_FULL>`. Troque `minha-sessao` pelo nome real e reinicie a API.
+2. Para conexões individuais pela interface, configure no `.env` da raiz `WHATSAPP_SERVER_URL`, `WHATSAPP_SERVER_SECRET_KEY` e `WPP_TOKEN_ENCRYPTION_KEY` (segredo aleatório forte, persistente e exclusivo da aplicação). O backend cria uma sessão por usuário, guarda o token criptografado e expõe somente QR Code e status ao próprio usuário.
+3. Na tela WhatsApp, clique em conectar e leia o QR Code com o WhatsApp do usuário. A interface permite consultar status, reiniciar e desconectar.
+4. `WHATSAPP_PROVIDER_URL` e `WHATSAPP_PROVIDER_TOKEN` continuam disponíveis como integração global legada/fallback. Sessões individuais utilizam as rotas documentadas pelo WPPConnect Server; confirme a compatibilidade com a versão instalada no Swagger local.
 
 O backend envia JSON com `phone` e `message`; telefones devem incluir codigo do pais e DDD, por exemplo `5511999999999`. Consulte a [documentacao oficial da API](https://wppconnect.io/swagger/wppconnect-server/) para detalhes. Falhas por destinatario sao registradas sem interromper os demais envios.
 

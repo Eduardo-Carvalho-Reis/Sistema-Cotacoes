@@ -8,6 +8,8 @@ function WhatsApp({ api, notify }) {
   const [form, setForm] = useState({ nome: '', tipo: 'NUMERO', identificador: '' });
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
+  const [session, setSession] = useState({ configurado: false, status: 'NAO_CONECTADO', conectado: false, qrCode: null });
+  const [sessionBusy, setSessionBusy] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -15,6 +17,8 @@ function WhatsApp({ api, notify }) {
       const result = await api('/api/whatsapp/destinatarios');
       setDestinatarios(result.destinatarios || []);
       setProviderReady(result.provedorConfigurado);
+      const sessionResult = await api('/api/whatsapp/sessao');
+      setSession(sessionResult);
     } catch (error) { notify(error.message); }
     finally { setLoading(false); }
   }, [api]);
@@ -40,12 +44,33 @@ function WhatsApp({ api, notify }) {
     } catch (error) { notify(error.message); }
   };
 
+  const sessionAction = async action => {
+    setSessionBusy(true);
+    try {
+      const result = await api(`/api/whatsapp/sessao${action ? `/${action}` : ''}`, { method: action ? 'POST' : 'GET' });
+      setSession(result);
+      notify(action === 'desconectar' ? 'Sessão desconectada.' : action === 'reiniciar' ? 'Sessão reiniciada.' : action === 'conectar' ? 'Solicitação de conexão enviada.' : 'Status atualizado.');
+    } catch (error) { notify(error.message); }
+    finally { setSessionBusy(false); }
+  };
+
   const active = destinatarios.filter(item => item.ativo);
   return <>
     <PageTitle eyebrow="ENVIO DE MENSAGENS" title="WhatsApp" description="Configure sua lista pessoal de destinatários para as respostas das cotações." />
     <section className={`panel whatsapp-provider-state ${providerReady ? 'ready' : 'missing'}`}>
       {providerReady ? <CheckCircle2 size={19}/> : <AlertCircle size={19}/>}
       <div><b>{providerReady ? 'Provedor conectado' : 'Provedor não configurado'}</b><span>{providerReady ? 'As respostas serão enviadas aos destinatários ativos ao serem encaminhadas.' : 'Configure WHATSAPP_PROVIDER_URL e WHATSAPP_PROVIDER_TOKEN no .env da API e reinicie o servidor.'}</span></div>
+    </section>
+    <section className="panel whatsapp-provider-state">
+      <MessageCircle size={19}/>
+      <div className="whatsapp-session-copy"><b>Sua sessão WhatsApp: {session.status?.replaceAll('_', ' ') || 'DESCONECTADO'}</b><span>{session.configurado ? 'A sessão é isolada por usuário e as credenciais permanecem no backend.' : 'Para ativar sessões individuais, configure WHATSAPP_SERVER_URL, WHATSAPP_SERVER_SECRET_KEY e WPP_TOKEN_ENCRYPTION_KEY no backend.'}</span>
+        {session.qrCode && <img className="whatsapp-qr" src={session.qrCode} alt="QR Code de conexão do WhatsApp"/>}
+        <div className="whatsapp-form-actions">
+          <Button type="button" disabled={sessionBusy || !session.configurado} onClick={() => sessionAction(session.conectado ? 'reiniciar' : 'conectar')}>{sessionBusy ? 'Aguarde...' : session.conectado ? 'Reiniciar sessão' : 'Conectar / gerar QR Code'}</Button>
+          {session.conectado && <Button type="button" variant="secondary" disabled={sessionBusy} onClick={() => sessionAction('desconectar')}>Desconectar</Button>}
+          <Button type="button" variant="secondary" disabled={sessionBusy} onClick={() => sessionAction('')}>Atualizar status</Button>
+        </div>
+      </div>
     </section>
     <div className="whatsapp-layout">
       <form className="panel whatsapp-form" onSubmit={addRecipient}>

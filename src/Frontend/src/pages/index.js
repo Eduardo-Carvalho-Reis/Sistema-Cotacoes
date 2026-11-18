@@ -8,3 +8,4 @@ export { Reports } from './Reports.jsx';
 export { Login } from './Login.jsx';
 export { Settings } from './Settings.jsx';
 export { WhatsApp } from './WhatsApp.jsx';
+export { UsersAdmin } from './UsersAdmin.jsx';
