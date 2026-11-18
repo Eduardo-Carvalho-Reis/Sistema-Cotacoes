@@ -1,6 +1,7 @@
 import test from "node:test";
 import assert from "node:assert/strict";
 import { validarTransicaoCotacao, respostasEstaoPendentes } from "../Services/cotacao-state.service.js";
+import { calcularStatusEntrega } from "../Services/delivery.service.js";
 
 test("cotação enviada pode entrar em andamento e ser concluída após aprovação", () => {
   assert.equal(validarTransicaoCotacao("ENVIADA", "EM_ANDAMENTO"), "EM_ANDAMENTO");
@@ -22,4 +23,11 @@ test("resposta em preenchimento ou ausente mantém a cotação pendente", () => 
   assert.equal(respostasEstaoPendentes([{ fornecedorId: 1, status: "ENCAMINHADA" }], fornecedores), true);
   assert.equal(respostasEstaoPendentes([{ fornecedorId: 1, status: "ENCAMINHADA" }, { fornecedorId: 2, status: "PREENCHIMENTO" }], fornecedores), true);
   assert.equal(respostasEstaoPendentes([{ fornecedorId: 1, status: "ENCAMINHADA" }, { fornecedorId: 2, status: "ENCERRADA" }], fornecedores), false);
+});
+
+test("entrega parcial não conclui o item e prazo vencido marca atraso", () => {
+  const agora = new Date("2026-11-18T12:00:00Z");
+  assert.equal(calcularStatusEntrega({ quantidade: 10, recebida: 4, agora }), "PARCIALMENTE_ENTREGUE");
+  assert.equal(calcularStatusEntrega({ quantidade: 10, recebida: 4, dataPrevista: "2026-11-17T00:00:00Z", agora }), "ATRASADA");
+  assert.equal(calcularStatusEntrega({ quantidade: 10, recebida: 10, dataPrevista: "2026-11-17T00:00:00Z", agora }), "ENTREGUE");
 });

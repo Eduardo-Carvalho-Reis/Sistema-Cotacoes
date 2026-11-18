@@ -27,6 +27,9 @@ model Usuario {
   perfil       Perfil              @relation(fields: [perfilId], references: [id], onDelete: Restrict)
   obra         Obra?               @relation(fields: [obraId], references: [id], onDelete: Restrict)
   cotacoes     CotacaoEnvio[]
+  comprasSolicitadas Compra[] @relation("CompraSolicitante")
+  comprasAprovadas Compra[] @relation("CompraAprovador")
+  comprasCanceladas Compra[] @relation("CompraCanceladaPor")
   respostas    CotacaoResposta[]
   aprovacoes   SelecaoCompraItem[]
   recebimentos RecebimentoItem[]
@@ -36,6 +39,7 @@ model Usuario {
   cotacoesCanceladas CotacaoEnvio[] @relation("CotacaoCanceladaPor")
   enviosResposta HistoricoEnvioResposta[]
   enviosCotacao HistoricoEnvioMensagem[]
+  historicosNotaFiscal HistoricoNotaFiscal[]
 }
 
 model WhatsAppDestinatario {
@@ -257,12 +261,23 @@ model Compra {
   dataCriacao    DateTime            @default(now())
   status         StatusCompra        @default(APROVACAO)
   observacaoCancelamento String?
+  solicitanteId Int?
+  aprovadorId Int?
+  canceladaPorId Int?
+  aprovadaEm DateTime?
+  canceladaEm DateTime?
+  valorAprovado Decimal? @db.Decimal(14, 2)
   obra           Obra                @relation(fields: [obraId], references: [id], onDelete: Restrict)
   cotacao        CotacaoEnvio        @relation(fields: [cotacaoEnvioId], references: [id], onDelete: Restrict)
+  solicitante Usuario? @relation("CompraSolicitante", fields: [solicitanteId], references: [id], onDelete: SetNull)
+  aprovador Usuario? @relation("CompraAprovador", fields: [aprovadorId], references: [id], onDelete: SetNull)
+  canceladaPor Usuario? @relation("CompraCanceladaPor", fields: [canceladaPorId], references: [id], onDelete: SetNull)
   selecoes       SelecaoCompraItem[]
   pedidos        PedidoCompra[]
   historicos     HistoricoStatus[]
   auditorias     Auditoria[]
+  notasFiscais NotaFiscal[]
+  historicosNotaFiscal HistoricoNotaFiscal[]
 }
 
 enum StatusCompra {
@@ -317,12 +332,24 @@ enum StatusPedido {
   CANCELADO
 }
 
+enum StatusEntrega {
+  PENDENTE
+  PARCIALMENTE_ENTREGUE
+  ENTREGUE
+  ATRASADA
+  CANCELADA
+}
+
 model PedidoCompraItem {
   id                  Int               @id @default(autoincrement())
   pedidoCompraId      Int
   selecaoCompraItemId Int               @unique
   quantidade          Decimal           @db.Decimal(12, 3)
   valorUnitario       Decimal           @db.Decimal(12, 2)
+  dataPrevistaEntrega DateTime?
+  dataEntregaEfetiva DateTime?
+  statusEntrega StatusEntrega @default(PENDENTE)
+  observacaoEntrega String?
   pedido              PedidoCompra      @relation(fields: [pedidoCompraId], references: [id], onDelete: Restrict)
   selecao             SelecaoCompraItem @relation(fields: [selecaoCompraItemId], references: [id], onDelete: Restrict)
   recebimentos        RecebimentoItem[]
@@ -331,14 +358,39 @@ model PedidoCompraItem {
 model NotaFiscal {
   id                Int          @id @default(autoincrement())
   pedidoCompraId    Int
+  compraId          Int
   numero            String
+  chaveAcesso       String?
   dataEmissao       DateTime
   valorTotal        Decimal      @db.Decimal(12, 2)
   arquivoReferencia String?
+  dataRegistro      DateTime     @default(now())
+  ativa             Boolean      @default(true)
   status            String       @default("REGISTRADA")
   pedido            PedidoCompra @relation(fields: [pedidoCompraId], references: [id], onDelete: Restrict)
+  compra            Compra       @relation(fields: [compraId], references: [id], onDelete: Restrict)
+  historicos        HistoricoNotaFiscal[]
 
   @@index([pedidoCompraId])
+  @@index([compraId, ativa])
+}
+
+model HistoricoNotaFiscal {
+  id Int @id @default(autoincrement())
+  notaFiscalId Int
+  compraId Int
+  usuarioId Int?
+  numero String
+  chaveAcesso String?
+  dataEmissao DateTime
+  valorTotal Decimal @db.Decimal(12, 2)
+  arquivoReferencia String?
+  dataRegistro DateTime
+  substituidaEm DateTime @default(now())
+  notaFiscal NotaFiscal @relation(fields: [notaFiscalId], references: [id], onDelete: Restrict)
+  compra Compra @relation(fields: [compraId], references: [id], onDelete: Restrict)
+  usuario Usuario? @relation(fields: [usuarioId], references: [id], onDelete: SetNull)
+  @@index([compraId, substituidaEm])
 }
 
 model RecebimentoItem {

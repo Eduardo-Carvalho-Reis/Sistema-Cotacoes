@@ -5,6 +5,7 @@ import { WhatsAppProvider } from "../Services/whatsapp.service.js";
 import { permitir, assertObraAccess, obraScope, isAdminUser } from "../middleware/auth.js";
 import { registrarAuditoria } from "../Services/audit.service.js";
 import { validarTransicaoCotacao, respostasEstaoPendentes } from "../Services/cotacao-state.service.js";
+import { calcularStatusEntrega } from "../Services/delivery.service.js";
 
 const router = Router();
 const whatsapp = new WhatsAppProvider();
@@ -15,14 +16,14 @@ async function concluirCompraSePronta(tx, compraId, usuarioId) {
   if (compra.status === "CANCELADA" || compra.status === "CONCLUIDA") return;
   const pedidos = await tx.pedidoCompra.findMany({
     where: { compraId },
-    include: { notasFiscais: true, itens: { include: { recebimentos: true } } },
+    include: { itens: { include: { recebimentos: true } } },
   });
+  const notaFiscalAtiva = await tx.notaFiscal.count({ where: { compraId, ativa: true } });
   const todosConcluidos = pedidos.length > 0 && pedidos.every(pedido =>
     pedido.status !== "CANCELADO"
-    && pedido.notasFiscais.length > 0
     && pedido.itens.length > 0
     && pedido.itens.every(item => item.recebimentos.reduce((sum, recebimento) => sum + Number(recebimento.quantidadeRecebida), 0) >= Number(item.quantidade))
-  );
+  ) && notaFiscalAtiva > 0;
   if (!todosConcluidos) return;
   await tx.compra.update({ where: { id: compraId }, data: { status: "CONCLUIDA" } });
   await tx.historicoStatus.create({ data: {
@@ -34,6 +35,25 @@ async function concluirCompraSePronta(tx, compraId, usuarioId) {
     compraId,
     observacao: "Todos os produtos foram recebidos e as notas fiscais foram lanÃ§adas.",
   } });
+  await registrarAuditoria(tx, { usuarioId, operacao: "CONCLUIR_COMPRA", entidadeTipo: "Compra", entidadeId: compraId, valoresAntes: { status: compra.status }, valoresNovos: { status: "CONCLUIDA" }, compraId });
+}
+
+async function salvarNotaFiscal(tx, { compraId, pedidoCompraId, usuarioId, dados }) {
+  const numero = String(dados.numero || "").trim();
+  const valorTotal = Number(dados.valorTotal);
+  const dataEmissao = new Date(dados.dataEmissao);
+  if (!numero || !Number.isFinite(valorTotal) || valorTotal < 0 || Number.isNaN(dataEmissao.getTime())) throw new Error("Informe número, data de emissão e valor válidos para a nota fiscal.");
+  const before = await tx.notaFiscal.findFirst({ where: { compraId, ativa: true } });
+  const payload = { numero, chaveAcesso: dados.chaveAcesso || null, dataEmissao, valorTotal, arquivoReferencia: dados.arquivoReferencia || null, dataRegistro: new Date(), ativa: true };
+  if (before) {
+    await tx.historicoNotaFiscal.create({ data: { notaFiscalId: before.id, compraId, usuarioId, numero: before.numero, chaveAcesso: before.chaveAcesso, dataEmissao: before.dataEmissao, valorTotal: before.valorTotal, arquivoReferencia: before.arquivoReferencia, dataRegistro: before.dataRegistro } });
+    const updated = await tx.notaFiscal.update({ where: { id: before.id }, data: { ...payload, pedidoCompraId } });
+    await registrarAuditoria(tx, { usuarioId, operacao: "EDITAR_NOTA_FISCAL", entidadeTipo: "NotaFiscal", entidadeId: updated.id, valoresAntes: before, valoresNovos: updated, compraId });
+    return updated;
+  }
+  const created = await tx.notaFiscal.create({ data: { ...payload, pedidoCompraId, compraId } });
+  await registrarAuditoria(tx, { usuarioId, operacao: "REGISTRAR_NOTA_FISCAL", entidadeTipo: "NotaFiscal", entidadeId: created.id, valoresNovos: created, compraId });
+  return created;
 }
 
 router.post("/cotacoes", async (req, res) => {
@@ -151,6 +171,7 @@ router.get("/cotacoes/:id/comparativo", async (req, res) => {
 
 router.get("/compras", async (req, res) => {
   try {
+    await prisma.pedidoCompraItem.updateMany({ where: { statusEntrega: { in: ["PENDENTE", "PARCIALMENTE_ENTREGUE"] }, dataPrevistaEntrega: { lt: new Date() }, pedido: { compra: obraScope(req.usuario) } }, data: { statusEntrega: "ATRASADA" } });
     res.json(await prisma.compra.findMany({
       where: {
         ...obraScope(req.usuario),
@@ -161,6 +182,7 @@ router.get("/compras", async (req, res) => {
       include: {
         obra: true,
         cotacao: true,
+        notasFiscais: { where: { ativa: true }, include: { pedido: { include: { fornecedor: true } } } },
         selecoes: { include: { oferta: { include: { resposta: { include: { fornecedor: true } }, produto: true, itemSolicitado: { include: { aplicacao: true } } } }, aprovador: { select: { nome: true } } } },
         pedidos: {
           include: {
@@ -184,10 +206,12 @@ router.post("/compras/:id/cancelar", permitir("ADMINISTRADOR", "ADMINISTRADOR_SI
       const compra = await tx.compra.findUniqueOrThrow({ where: { id: compraId } });
       assertObraAccess(req.usuario, compra.obraId);
       if (compra.status === "CANCELADA") throw new Error("Esta compra jÃ¡ estÃ¡ cancelada.");
-      const atualizada = await tx.compra.update({ where: { id: compraId }, data: { status: "CANCELADA", observacaoCancelamento } });
+      const atualizada = await tx.compra.update({ where: { id: compraId }, data: { status: "CANCELADA", observacaoCancelamento, canceladaPorId: req.usuario.id, canceladaEm: new Date() } });
       const pedidos = await tx.pedidoCompra.findMany({ where: { compraId } });
       await tx.pedidoCompra.updateMany({ where: { compraId, status: { not: "CANCELADO" } }, data: { status: "CANCELADO" } });
+      await tx.pedidoCompraItem.updateMany({ where: { pedidoCompraId: { in: pedidos.map(pedido => pedido.id) }, statusEntrega: { not: "ENTREGUE" } }, data: { statusEntrega: "CANCELADA" } });
       await tx.historicoStatus.create({ data: { entidadeTipo: "Compra", entidadeId: compraId, statusAnterior: compra.status, statusNovo: "CANCELADA", usuarioId: req.usuario.id, compraId, observacao: observacaoCancelamento } });
+      await registrarAuditoria(tx, { usuarioId: req.usuario.id, operacao: "CANCELAR", entidadeTipo: "Compra", entidadeId: compraId, valoresAntes: { status: compra.status }, valoresNovos: { status: "CANCELADA", motivo: observacaoCancelamento }, compraId });
       for (const pedido of pedidos) if (pedido.status !== "CANCELADO") await tx.historicoStatus.create({ data: { entidadeTipo: "PedidoCompra", entidadeId: pedido.id, statusAnterior: pedido.status, statusNovo: "CANCELADO", usuarioId: req.usuario.id, pedidoCompraId: pedido.id, observacao: observacaoCancelamento } });
       return atualizada;
     });
@@ -195,31 +219,9 @@ router.post("/compras/:id/cancelar", permitir("ADMINISTRADOR", "ADMINISTRADOR_SI
   } catch (e) { fail(res, e); }
 });
 
-router.delete("/compras/:id", permitir("ADMINISTRADOR", "ADMINISTRADOR_SISTEMA"), async (req, res) => {
-  try {
-    const compraId = Number(req.params.id);
-    await prisma.$transaction(async tx => {
-      const compra = await tx.compra.findUniqueOrThrow({ where: { id: compraId } });
-      assertObraAccess(req.usuario, compra.obraId);
-      if (compra.status !== "CANCELADA") throw new Error("A compra precisa estar cancelada antes de ser apagada.");
-      const pedidos = await tx.pedidoCompra.findMany({ where: { compraId }, select: { id: true } });
-      const pedidoIds = pedidos.map(pedido => pedido.id);
-      const itensPedido = pedidoIds.length ? await tx.pedidoCompraItem.findMany({ where: { pedidoCompraId: { in: pedidoIds } }, select: { id: true } }) : [];
-      const itemIds = itensPedido.map(item => item.id);
-      await tx.historicoStatus.deleteMany({ where: { OR: [{ compraId }, { pedidoCompraId: { in: pedidoIds } }] } });
-      if (itemIds.length) await tx.recebimentoItem.deleteMany({ where: { pedidoCompraItemId: { in: itemIds } } });
-      if (pedidoIds.length) {
-        await tx.notaFiscal.deleteMany({ where: { pedidoCompraId: { in: pedidoIds } } });
-        await tx.pedidoCompraItem.deleteMany({ where: { pedidoCompraId: { in: pedidoIds } } });
-        await tx.pedidoCompra.deleteMany({ where: { id: { in: pedidoIds } } });
-      }
-      await tx.selecaoCompraItem.deleteMany({ where: { compraId } });
-      await tx.compra.delete({ where: { id: compraId } });
-    });
-    res.status(204).send();
-  } catch (e) { fail(res, e); }
+router.delete("/compras/:id", permitir("ADMINISTRADOR", "ADMINISTRADOR_SISTEMA"), async (_req, res) => {
+  return res.status(409).json({ erro: "Compras são registros históricos e não podem ser excluídas. Cancele a compra para preservar sua trilha de auditoria." });
 });
-
 router.post("/cotacoes/:id/enviar", async (req, res) => {
   try {
     const id = Number(req.params.id);
@@ -452,7 +454,7 @@ router.post("/compras/aprovar", permitir("ADMINISTRADOR", "ADMINISTRADOR_SISTEMA
       const cotacao = await tx.cotacaoEnvio.findUniqueOrThrow({ where: { id: Number(cotacaoEnvioId) }, include: { itens: true, fornecedores: true, respostas: { include: { itens: true } } } });
       assertObraAccess(req.usuario, cotacao.obraId);
       if (!["EM_ANDAMENTO", "ENVIADA"].includes(cotacao.status)) throw new Error("A cotaÃ§Ã£o nÃ£o estÃ¡ disponÃ­vel para anÃ¡lise de compra.");
-      const c = await tx.compra.upsert({ where: { cotacaoEnvioId: cotacao.id }, update: {}, create: { obraId: cotacao.obraId, cotacaoEnvioId: cotacao.id } });
+      const c = await tx.compra.upsert({ where: { cotacaoEnvioId: cotacao.id }, update: {}, create: { obraId: cotacao.obraId, cotacaoEnvioId: cotacao.id, solicitanteId: cotacao.usuarioId } });
       const seen = new Set();
       for (const decision of itens) {
         if (seen.has(String(decision.ofertaId))) throw new Error("Cada oferta deve aparecer uma Ãºnica vez por decisÃ£o.");
@@ -478,6 +480,9 @@ router.post("/compras/aprovar", permitir("ADMINISTRADOR", "ADMINISTRADOR_SISTEMA
       }
       const selecoesAprovadas = await tx.selecaoCompraItem.count({ where: { compraId: c.id, status: "APROVADA" } });
       if (selecoesAprovadas > 0) {
+        const aprovacoes = await tx.selecaoCompraItem.findMany({ where: { compraId: c.id, status: "APROVADA" } });
+        const totalAprovado = aprovacoes.reduce((sum, row) => sum + Number(row.quantidadeAprovada) * Number(row.valorUnitarioAprovado), 0);
+        await tx.compra.update({ where: { id: c.id }, data: { aprovadorId: req.usuario.id, aprovadaEm: new Date(), valorAprovado: totalAprovado } });
         const novoStatus = validarTransicaoCotacao(cotacao.status, "CONCLUIDA", { compraAprovada: true });
         await tx.cotacaoEnvio.update({ where: { id: cotacao.id }, data: { status: novoStatus } });
         await tx.historicoStatus.create({ data: { entidadeTipo: "CotacaoEnvio", entidadeId: cotacao.id, statusAnterior: cotacao.status, statusNovo: novoStatus, usuarioId: req.usuario.id, cotacaoEnvioId: cotacao.id, observacao: `Compra ${c.id} aprovada.` } });
@@ -493,8 +498,8 @@ router.post("/compras/aprovar", permitir("ADMINISTRADOR", "ADMINISTRADOR_SISTEMA
         }
       }
       await tx.historicoStatus.create({ data: { entidadeTipo: "Compra", entidadeId: c.id, statusNovo: c.status, usuarioId: req.usuario.id, compraId: c.id, cotacaoEnvioId: cotacao.id } });
-      await registrarAuditoria(tx, { usuarioId: req.usuario.id, operacao: "APROVAR_OFERTAS", entidadeTipo: "Compra", entidadeId: c.id, valoresNovos: { ofertas: itens, totalAprovado: (await tx.selecaoCompraItem.findMany({ where: { compraId: c.id, status: "APROVADA" } })).reduce((sum, row) => sum + Number(row.quantidadeAprovada) * Number(row.valorUnitarioAprovado), 0) }, cotacaoEnvioId: cotacao.id, compraId: c.id });
-      return tx.compra.findUnique({ where: { id: c.id }, include: { obra: true, cotacao: true, selecoes: { include: { oferta: { include: { resposta: { include: { fornecedor: true } }, produto: true, itemSolicitado: { include: { aplicacao: true } } } }, aprovador: { select: { nome: true } } } } } });
+      await registrarAuditoria(tx, { usuarioId: req.usuario.id, operacao: "APROVAR_OFERTAS", entidadeTipo: "Compra", entidadeId: c.id, valoresNovos: { ofertas: itens, totalAprovado: selecoesAprovadas ? (await tx.compra.findUnique({ where: { id: c.id }, select: { valorAprovado: true } })).valorAprovado : 0 }, cotacaoEnvioId: cotacao.id, compraId: c.id });
+      return tx.compra.findUnique({ where: { id: c.id }, include: { obra: true, cotacao: true, notasFiscais: { where: { ativa: true } }, selecoes: { include: { oferta: { include: { resposta: { include: { fornecedor: true } }, produto: true, itemSolicitado: { include: { aplicacao: true } } } }, aprovador: { select: { nome: true } } } } } });
     }, { isolationLevel: "Serializable" });
     const ofertasAprovadasAgora = new Set(itens.filter(item => item.status !== "REJEITADA").map(item => Number(item.ofertaId)));
     const aprovados = compra.selecoes.filter(selecao => selecao.status === "APROVADA" && ofertasAprovadasAgora.has(selecao.cotacaoRespostaItemId));
@@ -548,6 +553,9 @@ router.post("/compras/:id/pedidos", permitir("ADMINISTRADOR", "ADMINISTRADOR_SIS
   try {
     const compraId = Number(req.params.id);
     const rows = await prisma.$transaction(async tx => {
+      const compra = await tx.compra.findUniqueOrThrow({ where: { id: compraId } });
+      assertObraAccess(req.usuario, compra.obraId);
+      if (compra.status === "CANCELADA" || !compra.aprovadaEm) throw new Error("A compra precisa estar aprovada e ativa para gerar pedidos.");
       const aprovados = await tx.selecaoCompraItem.findMany({ where: { compraId, status: "APROVADA" }, include: { oferta: { include: { resposta: true } } } });
       if (!aprovados.length) throw new Error("A compra nÃ£o possui itens aprovados.");
       const grupos = Map.groupBy(aprovados, s => String(s.oferta.resposta.fornecedorId));
@@ -555,7 +563,9 @@ router.post("/compras/:id/pedidos", permitir("ADMINISTRADOR", "ADMINISTRADOR_SIS
         const pedido = await tx.pedidoCompra.upsert({ where: { compraId_fornecedorId: { compraId, fornecedorId: Number(fornecedorId) } }, update: {}, create: { compraId, fornecedorId: Number(fornecedorId) } });
         for (const s of selecoes) await tx.pedidoCompraItem.upsert({ where: { selecaoCompraItemId: s.id }, update: {}, create: { pedidoCompraId: pedido.id, selecaoCompraItemId: s.id, quantidade: s.quantidadeAprovada, valorUnitario: s.valorUnitarioAprovado } });
       }
-      await tx.compra.update({ where: { id: compraId }, data: { status: "PEDIDOS_ABERTOS" } });
+      const updated = await tx.compra.update({ where: { id: compraId }, data: { status: "PEDIDOS_ABERTOS" } });
+      await tx.historicoStatus.create({ data: { entidadeTipo: "Compra", entidadeId: compraId, statusAnterior: compra.status, statusNovo: updated.status, usuarioId: req.usuario.id, compraId } });
+      await registrarAuditoria(tx, { usuarioId: req.usuario.id, operacao: "GERAR_PEDIDOS", entidadeTipo: "Compra", entidadeId: compraId, valoresAntes: { status: compra.status }, valoresNovos: { status: updated.status }, compraId });
       return tx.pedidoCompra.findMany({ where: { compraId }, include: { fornecedor: true, itens: true } });
     });
     res.status(201).json(rows);
@@ -591,6 +601,7 @@ router.patch("/pedidos/:id/confirmar", async (req, res) => {
       const updated = await tx.pedidoCompra.update({ where: { id }, data: { status: "CONFIRMADO", dataPedido: new Date() } });
       await tx.historicoStatus.create({ data: { entidadeTipo: "PedidoCompra", entidadeId: id, statusAnterior: current.status, statusNovo: "CONFIRMADO", usuarioId: req.usuario.id, pedidoCompraId: id } });
       await tx.compra.update({ where: { id: current.compraId }, data: { status: "EM_ANDAMENTO" } });
+      await registrarAuditoria(tx, { usuarioId: req.usuario.id, operacao: "CONFIRMAR_PEDIDO", entidadeTipo: "PedidoCompra", entidadeId: id, valoresAntes: { status: current.status }, valoresNovos: { status: updated.status }, compraId: current.compraId, pedidoCompraId: id });
       return updated;
     });
     res.json(pedido);
@@ -600,33 +611,60 @@ router.patch("/pedidos/:id/confirmar", async (req, res) => {
 
 router.post("/pedidos/:id/notas-fiscais", async (req, res) => {
   try {
-    const { numero, dataEmissao, valorTotal, arquivoReferencia } = req.body;
-    if (Number(valorTotal) < 0) throw new Error("Valor nÃ£o pode ser negativo.");
+    const pedidoCompraId = Number(req.params.id);
     const result = await prisma.$transaction(async tx => {
-      const pedido = await tx.pedidoCompra.findUniqueOrThrow({ where: { id: Number(req.params.id) }, include: { compra: true } });
+      const pedido = await tx.pedidoCompra.findUniqueOrThrow({ where: { id: pedidoCompraId }, include: { compra: true } });
       assertObraAccess(req.usuario, pedido.compra.obraId);
-      const notaFiscal = await tx.notaFiscal.create({ data: { pedidoCompraId: pedido.id, numero, dataEmissao: new Date(dataEmissao), valorTotal: Number(valorTotal), arquivoReferencia } });
+      const notaFiscal = await salvarNotaFiscal(tx, { compraId: pedido.compraId, pedidoCompraId, usuarioId: req.usuario.id, dados: req.body });
       await concluirCompraSePronta(tx, pedido.compraId, req.usuario.id);
       return notaFiscal;
     });
-    res.status(201).json(result);
+    res.status(200).json(result);
   } catch (e) { fail(res, e); }
 });
 
+router.put("/compras/:id/nota-fiscal", async (req, res) => {
+  try {
+    const compraId = Number(req.params.id), pedidoCompraId = Number(req.body.pedidoCompraId);
+    const result = await prisma.$transaction(async tx => {
+      const compra = await tx.compra.findUniqueOrThrow({ where: { id: compraId } });
+      assertObraAccess(req.usuario, compra.obraId);
+      const pedido = await tx.pedidoCompra.findUniqueOrThrow({ where: { id: pedidoCompraId } });
+      if (pedido.compraId !== compraId) throw new Error("O pedido informado não pertence a esta compra.");
+      const notaFiscal = await salvarNotaFiscal(tx, { compraId, pedidoCompraId, usuarioId: req.usuario.id, dados: req.body });
+      await concluirCompraSePronta(tx, compraId, req.usuario.id);
+      return notaFiscal;
+    });
+    res.json(result);
+  } catch (e) { fail(res, e); }
+});
+
+router.get("/compras/:id/notas-fiscais/historico", async (req, res) => {
+  try {
+    const compra = await prisma.compra.findUniqueOrThrow({ where: { id: Number(req.params.id) } });
+    assertObraAccess(req.usuario, compra.obraId);
+    res.json(await prisma.historicoNotaFiscal.findMany({ where: { compraId: compra.id }, include: { usuario: { select: { id: true, nome: true } } }, orderBy: { substituidaEm: "desc" } }));
+  } catch (e) { fail(res, e); }
+});
 router.post("/pedidos/itens/:id/recebimentos", async (req, res) => {
   try {
     const itemId = Number(req.params.id), quantidadeRecebida = Number(req.body.quantidadeRecebida);
     const result = await prisma.$transaction(async tx => {
       const item = await tx.pedidoCompraItem.findUniqueOrThrow({ where: { id: itemId }, include: { pedido: { include: { compra: true } } } });
       assertObraAccess(req.usuario, item.pedido.compra.obraId);
+      if (item.statusEntrega === "CANCELADA") throw new Error("Não é possível receber um item com entrega cancelada.");
       const anterior = await tx.recebimentoItem.aggregate({ where: { pedidoCompraItemId: itemId }, _sum: { quantidadeRecebida: true } });
       if (quantidadeRecebida <= 0 || Number(anterior._sum.quantidadeRecebida || 0) + quantidadeRecebida > Number(item.quantidade)) throw new Error("Quantidade recebida invÃ¡lida ou acima do saldo do pedido.");
       const recebimento = await tx.recebimentoItem.create({ data: { pedidoCompraItemId: itemId, quantidadeRecebida, usuarioId: req.usuario.id, observacao: req.body.observacao } });
+      const itemTotal = Number(anterior._sum.quantidadeRecebida || 0) + quantidadeRecebida;
+      const itemEntregue = itemTotal >= Number(item.quantidade);
+      await tx.pedidoCompraItem.update({ where: { id: itemId }, data: { statusEntrega: calcularStatusEntrega({ quantidade: item.quantidade, recebida: itemTotal, dataPrevista: item.dataPrevistaEntrega }), dataEntregaEfetiva: itemEntregue ? recebimento.dataRecebimento : null, observacaoEntrega: req.body.observacao || item.observacaoEntrega } });
       const total = await tx.pedidoCompraItem.findMany({ where: { pedidoCompraId: item.pedidoCompraId }, include: { recebimentos: true } });
       const concluido = total.every(i => i.recebimentos.reduce((s, r) => s + Number(r.quantidadeRecebida), 0) >= Number(i.quantidade));
       const iniciado = total.some(i => i.recebimentos.length);
       await tx.pedidoCompra.update({ where: { id: item.pedidoCompraId }, data: { status: concluido ? "RECEBIDO" : iniciado ? "PARCIALMENTE_RECEBIDO" : item.pedido.status } });
       await tx.historicoStatus.create({ data: { entidadeTipo: "RecebimentoItem", entidadeId: recebimento.id, statusNovo: concluido ? "RECEBIDO" : "PARCIALMENTE_RECEBIDO", usuarioId: req.usuario.id, pedidoCompraId: item.pedidoCompraId, observacao: `Recebimento de ${quantidadeRecebida}` } });
+      await registrarAuditoria(tx, { usuarioId: req.usuario.id, operacao: "REGISTRAR_RECEBIMENTO", entidadeTipo: "RecebimentoItem", entidadeId: recebimento.id, valoresNovos: recebimento, compraId: item.pedido.compraId, pedidoCompraId: item.pedidoCompraId });
       await concluirCompraSePronta(tx, item.pedido.compraId, req.usuario.id);
       return recebimento;
     });
@@ -652,23 +690,51 @@ router.post("/pedidos/:id/recebimentos", async (req, res) => {
       const registros = [];
       for (const entrada of itens) {
         const item = pedido.itens.find(row => row.id === Number(entrada.pedidoCompraItemId));
+        if (item.statusEntrega === "CANCELADA") throw new Error("Não é possível receber um item com entrega cancelada.");
         const quantidade = Number(entrada.quantidadeRecebida);
         const jaRecebida = item.recebimentos.reduce((sum, registro) => sum + Number(registro.quantidadeRecebida), 0);
         if (!Number.isFinite(quantidade) || quantidade < 0 || jaRecebida + quantidade > Number(item.quantidade)) throw new Error("Uma das quantidades recebidas Ã© invÃ¡lida ou maior que o saldo do pedido.");
-        const registro = await tx.recebimentoItem.create({ data: { pedidoCompraItemId: item.id, quantidadeRecebida: quantidade, dataRecebimento: data, usuarioId: req.usuario.id, observacao } });
-        registros.push(registro);
+        if (quantidade > 0) {
+          const registro = await tx.recebimentoItem.create({ data: { pedidoCompraItemId: item.id, quantidadeRecebida: quantidade, dataRecebimento: data, usuarioId: req.usuario.id, observacao } });
+          registros.push(registro);
+        }
       }
 
       const atualizados = await tx.pedidoCompraItem.findMany({ where: { pedidoCompraId: pedidoId }, include: { recebimentos: true } });
+      for (const item of atualizados) {
+        const quantidadeRecebida = item.recebimentos.reduce((sum, registro) => sum + Number(registro.quantidadeRecebida), 0);
+        const entregue = quantidadeRecebida >= Number(item.quantidade);
+        await tx.pedidoCompraItem.update({ where: { id: item.id }, data: { statusEntrega: calcularStatusEntrega({ quantidade: item.quantidade, recebida: quantidadeRecebida, dataPrevista: item.dataPrevistaEntrega }), dataEntregaEfetiva: entregue ? data : null, observacaoEntrega: observacao || item.observacaoEntrega } });
+      }
       const concluido = atualizados.every(item => item.recebimentos.reduce((sum, registro) => sum + Number(registro.quantidadeRecebida), 0) >= Number(item.quantidade));
       const iniciado = atualizados.some(item => item.recebimentos.length > 0);
       const status = concluido ? "RECEBIDO" : iniciado ? "PARCIALMENTE_RECEBIDO" : pedido.status;
       const pedidoAtualizado = await tx.pedidoCompra.update({ where: { id: pedidoId }, data: { status } });
+      for (const registro of registros) await registrarAuditoria(tx, { usuarioId: req.usuario.id, operacao: "REGISTRAR_RECEBIMENTO", entidadeTipo: "RecebimentoItem", entidadeId: registro.id, valoresNovos: registro, compraId: pedido.compraId, pedidoCompraId: pedidoId });
       for (const registro of registros) await tx.historicoStatus.create({ data: { entidadeTipo: "RecebimentoItem", entidadeId: registro.id, statusNovo: status, usuarioId: req.usuario.id, pedidoCompraId: pedidoId, observacao: `Recebimento de ${registro.quantidadeRecebida}${observacao ? ` Â· ${observacao}` : ""}` } });
       await concluirCompraSePronta(tx, pedido.compraId, req.usuario.id);
       return { pedido: pedidoAtualizado, recebimentos: registros };
     });
     res.status(201).json(result);
+  } catch (e) { fail(res, e); }
+});
+
+router.patch("/pedidos/itens/:id/entrega", async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const row = await prisma.$transaction(async tx => {
+      const item = await tx.pedidoCompraItem.findUniqueOrThrow({ where: { id }, include: { pedido: { include: { compra: true }, } , recebimentos: true } });
+      assertObraAccess(req.usuario, item.pedido.compra.obraId);
+      if (["ENTREGUE", "CANCELADA"].includes(item.statusEntrega)) throw new Error("A entrega deste item já foi encerrada.");
+      const dataPrevistaEntrega = req.body.dataPrevistaEntrega ? new Date(req.body.dataPrevistaEntrega) : null;
+      if (dataPrevistaEntrega && Number.isNaN(dataPrevistaEntrega.getTime())) throw new Error("Data prevista de entrega inválida.");
+      const quantidadeRecebida = item.recebimentos.reduce((sum, receipt) => sum + Number(receipt.quantidadeRecebida), 0);
+      const statusEntrega = calcularStatusEntrega({ quantidade: item.quantidade, recebida: quantidadeRecebida, dataPrevista: dataPrevistaEntrega, cancelada: req.body.status === "CANCELADA" });
+      const updated = await tx.pedidoCompraItem.update({ where: { id }, data: { dataPrevistaEntrega, statusEntrega, observacaoEntrega: req.body.observacoes ?? item.observacaoEntrega } });
+      await registrarAuditoria(tx, { usuarioId: req.usuario.id, operacao: "ATUALIZAR_ENTREGA", entidadeTipo: "PedidoCompraItem", entidadeId: id, valoresAntes: { dataPrevistaEntrega: item.dataPrevistaEntrega, statusEntrega: item.statusEntrega, observacaoEntrega: item.observacaoEntrega }, valoresNovos: updated, compraId: item.pedido.compraId, pedidoCompraId: item.pedidoCompraId });
+      return updated;
+    });
+    res.json(row);
   } catch (e) { fail(res, e); }
 });
 
@@ -745,5 +811,7 @@ router.get("/respostas/:id/envios", async (req, res) => {
   } catch (e) { fail(res, e); }
 });
 export default router;
+
+
 
 
