@@ -1,4 +1,4 @@
-import { UserRound, MessageCircle, Boxes, WalletCards, ArrowRight } from 'lucide-react';
+import { UserRound, MessageCircle, Boxes, WalletCards, ArrowRight, Users } from 'lucide-react';
 import { PageTitle } from '../components/index.js';
 
 function Settings({ user, go }) {
@@ -9,6 +9,11 @@ function Settings({ user, go }) {
         <div className="settings-card-icon"><UserRound size={18}/></div>
         <div><span className="eyebrow">CONTA ATUAL</span><h2>{user?.nome || 'Usuário'}</h2><p>{(typeof user?.perfil === 'string' ? user.perfil : user?.perfil?.nome || 'Perfil não informado').replaceAll('_', ' ')}</p></div>
       </section>
+      <button className="panel settings-card settings-link" onClick={() => go('users')}>
+        <div className="settings-card-icon"><Users size={18}/></div>
+        <div><span className="eyebrow">CONTAS E ACESSO</span><h2>Usuários</h2><p>Consulte usuários e atualize seus dados pessoais e senha.</p></div>
+        <ArrowRight size={17}/>
+      </button>
       <button className="panel settings-card settings-link" onClick={() => go('whatsapp')}>
         <div className="settings-card-icon"><MessageCircle size={18}/></div>
         <div><span className="eyebrow">ENVIO DE MENSAGENS</span><h2>WhatsApp</h2><p>Cadastre números e grupos que receberão as respostas das cotações.</p></div>

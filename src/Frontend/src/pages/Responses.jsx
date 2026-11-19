@@ -37,15 +37,15 @@ function Responses({ data, setModal, go, api }) {
   const totalPending = quoteRows.reduce((total, row) => total + row.suppliers.filter(item => !item.answer || item.answer.status === 'PREENCHIMENTO').length, 0);
 
   return <>
-    <PageTitle eyebrow="RETORNO DOS FORNECEDORES" title="Respostas" description="Acompanhe as respostas agrupadas por cotaÃ§Ã£o e registre as propostas recebidas." action={<div className="title-pill"><MessageCircle size={16}/> {totalRegistered} registradas</div>}/>
-    <div className="tip-banner"><div className="tip-mark"><MessageCircle size={18}/></div><div><b>As respostas chegam por aqui</b><span>Abra uma cotaÃ§Ã£o para ver os fornecedores e registrar valores, disponibilidade e itens extras.</span></div></div>
+    <PageTitle eyebrow="RETORNO DOS FORNECEDORES" title="Respostas" description="Acompanhe as respostas agrupadas por cotação e registre as propostas recebidas." action={<div className="title-pill"><MessageCircle size={16}/> {totalRegistered} registradas</div>}/>
+    <div className="tip-banner"><div className="tip-mark"><MessageCircle size={18}/></div><div><b>As respostas chegam por aqui</b><span>Abra uma cotação para ver os fornecedores e registrar valores, disponibilidade e itens extras.</span></div></div>
     <div className="toolbar response-filters">
       <SearchableSelect className="response-filter-select" options={workOptions} value={workId} onChange={setWorkId} placeholder="Filtrar por obra" getLabel={work => work.nome} clearLabel="Todas as obras"/>
       <SearchableSelect className="response-filter-select" options={supplierOptions} value={supplierId} onChange={setSupplierId} placeholder="Filtrar por fornecedor" getLabel={supplier => supplier.nome} clearLabel="Todos os fornecedores"/>
-      <SearchableSelect className="response-filter-select" options={quoteOptions} value={quoteId} onChange={setQuoteId} placeholder="Filtrar por cotaÃ§Ã£o" getLabel={quote => `CotaÃ§Ã£o #${String(quote.id).padStart(4, '0')} Â· ${quote.obra?.nome || 'Obra'}`} clearLabel="Todas as cotaÃ§Ãµes"/>
+      <SearchableSelect className="response-filter-select" options={quoteOptions} value={quoteId} onChange={setQuoteId} placeholder="Filtrar por cotação" getLabel={quote => `Cotação #${String(quote.id).padStart(4, '0')} · ${quote.obra?.nome || 'Obra'}`} clearLabel="Todas as cotações"/>
     </div>
     <div className="panel table-panel">
-      <div className="panel-heading table-heading"><div><span className="eyebrow">ACOMPANHAMENTO</span><h2>CotaÃ§Ãµes</h2></div><span className="result-count">{totalPending} aguardando preenchimento</span></div>
+      <div className="panel-heading table-heading"><div><span className="eyebrow">ACOMPANHAMENTO</span><h2>Cotações</h2></div><span className="result-count">{totalPending} aguardando preenchimento</span></div>
       <div className="response-quote-list">
         {quoteRows.map(({ quote, suppliers }) => {
           const expanded = expandedQuoteId === quote.id;
@@ -53,7 +53,7 @@ function Responses({ data, setModal, go, api }) {
           return <section className="response-quote-group" key={quote.id}>
             <button className="response-quote-heading" type="button" aria-expanded={expanded} aria-controls={'response-quote-' + quote.id} onClick={() => setExpandedQuoteId(current => current === quote.id ? null : quote.id)}>
               <span className="response-quote-icon"><ClipboardList size={17}/></span>
-              <span className="response-quote-title"><b>CotaÃ§Ã£o #{String(quote.id).padStart(4, '0')}</b><span>{quote.obra?.nome || 'Obra'} Â· {quote.itens?.length || 0} produtos</span></span>
+              <span className="response-quote-title"><b>Cotação #{String(quote.id).padStart(4, '0')}</b><span>{quote.obra?.nome || 'Obra'} · {quote.itens?.length || 0} produtos</span></span>
               <span className="response-quote-counts"><span>{answered} de {suppliers.length} respostas</span><small>{suppliers.length - answered} aguardando</small></span>
               <ChevronRight className={'response-quote-chevron' + (expanded ? ' expanded' : '')} size={18}/>
             </button>
@@ -62,12 +62,12 @@ function Responses({ data, setModal, go, api }) {
                 <div className="supplier-avatar">{supplier?.nome?.slice(0, 1)}</div>
                 <div className="response-main"><b>{supplier?.nome || 'Fornecedor'}</b><span>{quote.itens?.length || 0} produtos solicitados</span></div>
                 <div className="response-meta">{answer ? <Badge value={answer.status}/> : <Badge value="PENDENTE"/>}<small>{answer?.dataResposta ? 'Recebida em ' + date(answer.dataResposta) : 'Aguardando retorno'}</small></div>
-                <Button variant="secondary small-button" disabled={answer && !['PREENCHIMENTO','ENCAMINHADA'].includes(answer.status)} onClick={() => setModal({ type: 'respond', quote, supplierId: supplier.id })}>{!answer ? 'Registrar resposta' : answer.status === 'PREENCHIMENTO' ? 'Continuar resposta' : 'JÃ¡ encaminhada'} <ArrowRight size={15}/></Button>
+                <Button variant="secondary small-button" disabled={answer && !['PREENCHIMENTO','ENCAMINHADA'].includes(answer.status)} onClick={() => setModal({ type: 'respond', quote, supplierId: supplier.id })}>{!answer ? 'Registrar resposta' : answer.status === 'PREENCHIMENTO' ? 'Continuar resposta' : 'Já encaminhada'} <ArrowRight size={15}/></Button>
               </div>)}
             </div>}
           </section>;
         })}
-        {!quoteRows.length && <Empty icon={MessageCircle} title="Ainda sem solicitaÃ§Ãµes" body="Crie uma cotaÃ§Ã£o e envie aos fornecedores para comeÃ§ar a receber respostas."/>}
+        {!quoteRows.length && <Empty icon={MessageCircle} title="Ainda sem solicitações" body="Crie uma cotação e envie aos fornecedores para começar a receber respostas."/>}
       </div>
     </div>
   </>;
@@ -111,7 +111,7 @@ function ResponseModal({ quote, supplierId: initialSupplierId, data, api, refres
   const save = async () => {
     if (!supplierId) return notify('Selecione o fornecedor.');
     const items = rows.filter(r => !r.adicional || r.produtoId);
-    if (items.some(r => !r.indisponivel && (!Number(r.quantidadeOfertada) || Number(r.quantidadeOfertada) <= 0 || Number(r.valorUnitario) < 0))) return notify('Preencha quantidade e valor unitÃ¡rio para cada item disponÃ­vel.');
+    if (items.some(r => !r.indisponivel && (!Number(r.quantidadeOfertada) || Number(r.quantidadeOfertada) <= 0 || Number(r.valorUnitario) < 0))) return notify('Preencha quantidade e valor unitário para cada item disponível.');
     setSaving(true);
     try {
       let response = existing;

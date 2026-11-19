@@ -25,14 +25,17 @@ function sessionUrl(session, path) {
   return `${baseUrl()}/api/${encodeURIComponent(session.nomeSessao)}/${path}`;
 }
 
-async function request(url, { method = "GET", token, body } = {}) {
+async function request(url, { method = "GET", token, body, timeoutMs = 15000 } = {}) {
   const response = await fetch(url, {
     method,
     headers: { ...(token ? { authorization: `Bearer ${token}` } : {}), ...(body ? { "content-type": "application/json" } : {}) },
     ...(body ? { body: JSON.stringify(body) } : {}),
-    signal: AbortSignal.timeout(15000),
+    signal: AbortSignal.timeout(timeoutMs),
   });
-  const payload = await response.json().catch(() => ({}));
+  const contentType = response.headers.get("content-type") || "";
+  const payload = contentType.startsWith("image/")
+    ? { qrcode: `data:${contentType};base64,${Buffer.from(await response.arrayBuffer()).toString("base64")}` }
+    : await response.json().catch(() => ({}));
   if (!response.ok) {
     const error = new Error(payload.message || payload.error || `WPPConnect respondeu HTTP ${response.status}.`);
     error.status = response.status;
@@ -42,7 +45,13 @@ async function request(url, { method = "GET", token, body } = {}) {
 }
 
 function tokenFrom(payload) {
-  return typeof payload.full === "string" ? payload.full : null;
+  if (typeof payload.token === "string") return payload.token;
+  if (typeof payload.full === "string") return payload.full.split(":").at(-1);
+  return null;
+}
+
+function bearerToken(value) {
+  return typeof value === "string" ? value.split(":").at(-1) : null;
 }
 
 function qrFrom(payload) {
@@ -77,11 +86,18 @@ export class WppConnectSessionService {
   }
 
   async tokenFor(session) {
-    if (session.tokenCriptografado) return decrypt(session.tokenCriptografado);
+    if (session.tokenCriptografado) {
+      const storedToken = decrypt(session.tokenCriptografado);
+      const token = bearerToken(storedToken);
+      if (token && token !== storedToken) {
+        await prisma.whatsAppSessao.update({ where: { id: session.id }, data: { tokenCriptografado: encrypt(token) } });
+      }
+      return token;
+    }
     const payload = await request(`${baseUrl()}/api/${encodeURIComponent(session.nomeSessao)}/${encodeURIComponent(process.env.WHATSAPP_SERVER_SECRET_KEY)}/generate-token`, { method: "POST" });
-    const full = tokenFrom(payload);
-    if (!full) throw new Error("WPPConnect não retornou o token de sessão esperado.");
-    const updated = await prisma.whatsAppSessao.update({ where: { id: session.id }, data: { tokenCriptografado: encrypt(full) } });
+    const token = tokenFrom(payload);
+    if (!token) throw new Error("WPPConnect não retornou o token de sessão esperado.");
+    const updated = await prisma.whatsAppSessao.update({ where: { id: session.id }, data: { tokenCriptografado: encrypt(token) } });
     return decrypt(updated.tokenCriptografado);
   }
 
@@ -90,24 +106,24 @@ export class WppConnectSessionService {
     const connected = connectedFrom(payload);
     const status = connected ? "CONECTADO" : qrFrom(payload) ? "AGUARDANDO_QR" : "DESCONECTADO";
     await prisma.whatsAppSessao.update({ where: { id: session.id }, data: { status, atualizadoStatusEm: new Date() } });
-    return { status, conectado: connected };
+    return { status, conectado: connected, qrCode: qrFrom(payload) };
   }
 
   async connect(userId, { restart = false } = {}) {
     const session = await this.ensureSession(userId);
     const token = await this.tokenFor(session);
     if (restart) await request(sessionUrl(session, "close-session"), { method: "POST", token }).catch(() => {});
-    const started = await request(sessionUrl(session, "start-session"), { method: "POST", token, body: { waitQrCode: true } });
+    const started = await request(sessionUrl(session, "start-session"), { method: "POST", token, body: { waitQrCode: true }, timeoutMs: 300000 });
     let qrPayload = started;
     if (!qrFrom(qrPayload)) {
       try { qrPayload = await request(sessionUrl(session, "qrcode-session"), { token }); }
       catch (error) { if (error.status !== 500) throw error; }
     }
     const status = await this.getStatus(session, token).catch(() => ({ status: "AGUARDANDO_QR", conectado: false }));
-    const qrCode = qrFrom(qrPayload);
+    const qrCode = qrFrom(qrPayload) || status.qrCode;
     const finalStatus = status.conectado ? "CONECTADO" : qrCode ? "AGUARDANDO_QR" : status.status;
     await prisma.whatsAppSessao.update({ where: { id: session.id }, data: { status: finalStatus, atualizadoStatusEm: new Date() } });
-    return { status: finalStatus, conectado: status.conectado, qrCode };
+    return { configurado: true, status: finalStatus, conectado: status.conectado, qrCode };
   }
 
   async status(userId) {
@@ -117,9 +133,9 @@ export class WppConnectSessionService {
     try {
       const token = await this.tokenFor(session);
       const status = await this.getStatus(session, token);
-      let qrCode = null;
-      if (!status.conectado) {
-        try { qrCode = qrFrom(await request(sessionUrl(session, "qrcode-session"), { token })); }
+      let qrCode = status.qrCode;
+      if (!status.conectado && !qrCode) {
+        try { qrCode = qrFrom(await request(sessionUrl(session, "qrcode-session"), { token })) || qrCode; }
         catch { /* A sessão pode ainda não ter QR. */ }
       }
       return { configurado: true, ...status, qrCode };
@@ -131,18 +147,38 @@ export class WppConnectSessionService {
 
   async disconnect(userId) {
     const session = await this.ensureSession(userId);
-    if (!session.tokenCriptografado) return { status: "DESCONECTADO" };
+    if (!session.tokenCriptografado) {
+      await prisma.whatsAppSessao.update({ where: { id: session.id }, data: { status: "DESCONECTADO", telefoneConectado: null, atualizadoStatusEm: new Date() } });
+      return { configurado: true, status: "DESCONECTADO", conectado: false, qrCode: null };
+    }
     const token = decrypt(session.tokenCriptografado);
-    await request(sessionUrl(session, "close-session"), { method: "POST", token });
-    await prisma.whatsAppSessao.update({ where: { id: session.id }, data: { status: "DESCONECTADO", telefoneConectado: null, atualizadoStatusEm: new Date() } });
-    return { status: "DESCONECTADO" };
+    // close-session only shuts down Chromium and preserves the linked WhatsApp
+    // account. logout-session unlinks it and clears WPPConnect's saved session,
+    // so the next start-session produces a fresh QR code.
+    try {
+      await request(sessionUrl(session, "logout-session"), { method: "POST", token });
+    } catch (error) {
+      const clearUrl = `${baseUrl()}/api/${encodeURIComponent(session.nomeSessao)}/${encodeURIComponent(process.env.WHATSAPP_SERVER_SECRET_KEY)}/clear-session-data`;
+      if (error.status !== 401) {
+        // Some WPPConnect versions navigate away during logout, then report a
+        // Puppeteer "Execution context was destroyed" error. Close the browser
+        // first so the admin cleanup can safely remove this session's profile.
+        await request(sessionUrl(session, "close-session"), { method: "POST", token }).catch(() => {});
+      }
+      await request(clearUrl, { method: "POST" });
+    }
+    await prisma.whatsAppSessao.update({ where: { id: session.id }, data: { tokenCriptografado: null, status: "DESCONECTADO", telefoneConectado: null, atualizadoStatusEm: new Date() } });
+    return { configurado: true, status: "DESCONECTADO", conectado: false, qrCode: null };
   }
 
   async enviar(userId, { telefone, mensagem }) {
     const session = await this.getSession(userId);
     if (!session?.tokenCriptografado) return null;
     const token = decrypt(session.tokenCriptografado);
-    const payload = await request(sessionUrl(session, "send-message"), { method: "POST", token, body: { phone: telefone, message: mensagem } });
+    const rawTarget = String(telefone || "").trim();
+    const phone = rawTarget.includes("@g.us") ? rawTarget : rawTarget.replace(/\D/g, "");
+    if (!phone) throw new Error("O destinatário não tem um telefone ou ID de grupo válido.");
+    const payload = await request(sessionUrl(session, "send-message"), { method: "POST", token, body: { phone: [phone], message: mensagem } });
     const id = payload.id;
     return { identificadorExterno: (typeof id === "string" ? id : id?._serialized) || payload.messageId || payload.response?.id || null };
   }

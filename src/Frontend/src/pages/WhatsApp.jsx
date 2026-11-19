@@ -26,6 +26,18 @@ function WhatsApp({ api, notify }) {
   }, [api]);
   useEffect(() => { load(); }, [load]);
 
+  useEffect(() => {
+    if (!session.configurado || session.conectado) return undefined;
+    let active = true;
+    const timer = setInterval(async () => {
+      try {
+        const current = await api('/api/whatsapp/sessao');
+        if (active) setSession(current);
+      } catch { /* Keep the current state during temporary network errors. */ }
+    }, 4000);
+    return () => { active = false; clearInterval(timer); };
+  }, [api, session.configurado, session.conectado]);
+
   const addRecipient = async event => {
     event.preventDefault();
     setSaving(true);
@@ -50,7 +62,7 @@ function WhatsApp({ api, notify }) {
     setSessionBusy(true);
     try {
       const result = await api(`/api/whatsapp/sessao${action ? `/${action}` : ''}`, { method: action ? 'POST' : 'GET' });
-      setSession(result);
+      setSession(current => ({ ...current, ...result, configurado: result.configurado ?? current.configurado }));
       notify(action === 'desconectar' ? 'Sessão desconectada.' : action === 'reiniciar' ? 'Sessão reiniciada.' : action === 'conectar' ? 'Solicitação de conexão enviada.' : 'Status atualizado.');
     } catch (error) { notify(error.message); }
     finally { setSessionBusy(false); }
@@ -74,7 +86,7 @@ function WhatsApp({ api, notify }) {
     <section className="panel whatsapp-provider-state">
       <MessageCircle size={19}/>
       <div className="whatsapp-session-copy"><b>Sua sessão WhatsApp: {session.status?.replaceAll('_', ' ') || 'DESCONECTADO'}</b><span>{session.configurado ? 'A sessão é isolada por usuário e as credenciais permanecem no backend.' : 'Para ativar sessões individuais, configure WHATSAPP_SERVER_URL, WHATSAPP_SERVER_SECRET_KEY e WPP_TOKEN_ENCRYPTION_KEY no backend.'}</span>
-        {session.qrCode && <img className="whatsapp-qr" src={session.qrCode} alt="QR Code de conexão do WhatsApp"/>}
+        {session.qrCode && <><img className="whatsapp-qr" src={session.qrCode} alt="QR Code de conexão do WhatsApp"/><small className="whatsapp-field-hint">Leia o QR Code logo após gerar. A tela atualiza o status e o código enquanto aguarda o pareamento.</small></>}
         <div className="whatsapp-form-actions">
           <Button type="button" disabled={sessionBusy || !session.configurado} onClick={() => sessionAction(session.conectado ? 'reiniciar' : 'conectar')}>{sessionBusy ? 'Aguarde...' : session.conectado ? 'Reiniciar sessão' : 'Conectar / gerar QR Code'}</Button>
           {session.conectado && <Button type="button" variant="secondary" disabled={sessionBusy} onClick={() => sessionAction('desconectar')}>Desconectar</Button>}

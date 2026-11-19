@@ -35,7 +35,7 @@ async function concluirCompraSePronta(tx, compraId, usuarioId) {
     statusNovo: "CONCLUIDA",
     usuarioId,
     compraId,
-    observacao: "Todos os produtos foram recebidos e as notas fiscais foram lanÃ§adas.",
+    observacao: "Todos os produtos foram recebidos e as notas fiscais foram lançadas.",
   } });
   await registrarAuditoria(tx, { usuarioId, operacao: "CONCLUIR_COMPRA", entidadeTipo: "Compra", entidadeId: compraId, valoresAntes: { status: compra.status }, valoresNovos: { status: "CONCLUIDA" }, compraId });
 }
@@ -69,9 +69,9 @@ router.post("/cotacoes", async (req, res) => {
         const quantidade = Number(i.quantidadeSolicitada);
         if (!Number.isFinite(quantidade) || quantidade <= 0) throw new Error("A quantidade solicitada deve ser maior que zero.");
         const produto = produtos.find(p => p.id === Number(i.produtoId));
-        if (!produto) throw new Error("Produto nÃ£o encontrado.");
+        if (!produto) throw new Error("Produto não encontrado.");
         const unidade = i.unidade || produto.unidade;
-        if (unidade !== produto.unidade) throw new Error("ConversÃµes de unidade nÃ£o configuradas; use a unidade cadastrada do produto.");
+        if (unidade !== produto.unidade) throw new Error("Conversões de unidade não configuradas; use a unidade cadastrada do produto.");
         return { produtoId: produto.id, quantidadeSolicitada: quantidade, unidade, aplicacaoId: i.aplicacaoId ? Number(i.aplicacaoId) : null };
       }) }, fornecedores: { create: [...new Set(fornecedorIds || [])].map(id => ({ fornecedorId: Number(id) })) } }, include: { itens: true, fornecedores: true } });
       return c;
@@ -94,19 +94,19 @@ router.patch("/cotacoes/:id", async (req, res) => {
     const id = Number(req.params.id);
     const atual = await prisma.cotacaoEnvio.findUniqueOrThrow({ where: { id }, include: { respostas: true, compras: true, itens: true, fornecedores: true } });
     assertObraAccess(req.usuario, atual.obraId);
-    if (atual.status !== "RASCUNHO" || atual.respostas.length || atual.compras.length) throw new Error("Somente cotaÃ§Ãµes em rascunho sem respostas ou compras podem ser editadas.");
+    if (atual.status !== "RASCUNHO" || atual.respostas.length || atual.compras.length) throw new Error("Somente cotações em rascunho sem respostas ou compras podem ser editadas.");
     const payload = req.body;
     const updated = await prisma.$transaction(async tx => {
       const data = {};
       if (payload.observacao !== undefined) data.observacao = payload.observacao;
       if (payload.itens !== undefined) {
-        if (!Array.isArray(payload.itens) || !payload.itens.length) throw new Error("A cotaÃ§Ã£o precisa ter ao menos um item.");
+        if (!Array.isArray(payload.itens) || !payload.itens.length) throw new Error("A cotação precisa ter ao menos um item.");
         const produtos = await tx.produto.findMany({ where: { id: { in: [...new Set(payload.itens.map(i => Number(i.produtoId)))] }, ativo: true } });
         const novosItens = payload.itens.map(i => {
           const produto = produtos.find(p => p.id === Number(i.produtoId));
           const quantidade = Number(i.quantidadeSolicitada);
-          if (!produto || !Number.isFinite(quantidade) || quantidade <= 0) throw new Error("Produto ou quantidade invÃ¡lidos.");
-          if ((i.unidade || produto.unidade) !== produto.unidade) throw new Error("ConversÃµes de unidade nÃ£o configuradas; use a unidade cadastrada do produto.");
+          if (!produto || !Number.isFinite(quantidade) || quantidade <= 0) throw new Error("Produto ou quantidade inválidos.");
+          if ((i.unidade || produto.unidade) !== produto.unidade) throw new Error("Conversões de unidade não configuradas; use a unidade cadastrada do produto.");
           return { produtoId: produto.id, quantidadeSolicitada: quantidade, unidade: produto.unidade, aplicacaoId: i.aplicacaoId ? Number(i.aplicacaoId) : null };
         });
         await tx.cotacaoEnvioItem.deleteMany({ where: { cotacaoEnvioId: id } });
@@ -133,7 +133,7 @@ router.post("/cotacoes/:id/cancelar", async (req, res) => {
       const atual = await tx.cotacaoEnvio.findUniqueOrThrow({ where: { id }, include: { respostas: true, compras: true } });
       assertObraAccess(req.usuario, atual.obraId);
       validarTransicaoCotacao(atual.status, "CANCELADA");
-      if (atual.compras.some(c => c.status !== "CANCELADA")) throw new Error("Cancele a compra vinculada antes de cancelar a cotaÃ§Ã£o.");
+      if (atual.compras.some(c => c.status !== "CANCELADA")) throw new Error("Cancele a compra vinculada antes de cancelar a cotação.");
       const row = await tx.cotacaoEnvio.update({ where: { id }, data: { status: "CANCELADA", cancelamentoMotivo: motivo, canceladaEm: new Date(), canceladaPorId: req.usuario.id } });
       await tx.historicoStatus.create({ data: { entidadeTipo: "CotacaoEnvio", entidadeId: id, statusAnterior: atual.status, statusNovo: row.status, usuarioId: req.usuario.id, cotacaoEnvioId: id, observacao: motivo } });
       await registrarAuditoria(tx, { usuarioId: req.usuario.id, operacao: "CANCELAR", entidadeTipo: "CotacaoEnvio", entidadeId: id, valoresAntes: { status: atual.status }, valoresNovos: { status: row.status, motivo, canceladaEm: row.canceladaEm }, cotacaoEnvioId: id });
@@ -148,12 +148,12 @@ router.delete("/cotacoes/:id", async (req, res) => {
     const id = Number(req.params.id);
     const current = await prisma.cotacaoEnvio.findUniqueOrThrow({ where: { id }, include: { obra: true } });
     assertObraAccess(req.usuario, current.obraId);
-    if (current.status !== "RASCUNHO") throw new Error("Somente cotaÃ§Ãµes em rascunho podem ser excluÃ­das.");
+    if (current.status !== "RASCUNHO") throw new Error("Somente cotações em rascunho podem ser excluídas.");
     const [respostas, compras, historicos, auditorias] = await Promise.all([
       prisma.cotacaoResposta.count({ where: { cotacaoEnvioId: id } }), prisma.compra.count({ where: { cotacaoEnvioId: id } }),
       prisma.historicoStatus.count({ where: { cotacaoEnvioId: id } }), prisma.auditoria.count({ where: { cotacaoEnvioId: id } }),
     ]);
-    if (respostas || compras || historicos || auditorias) throw new Error("A cotaÃ§Ã£o possui histÃ³rico ou vÃ­nculos e nÃ£o pode ser excluÃ­da.");
+    if (respostas || compras || historicos || auditorias) throw new Error("A cotação possui histórico ou vínculos e não pode ser excluída.");
     await prisma.$transaction(async tx => {
       await tx.cotacaoEnvioFornecedor.deleteMany({ where: { cotacaoEnvioId: id } });
       await tx.cotacaoEnvioItem.deleteMany({ where: { cotacaoEnvioId: id } });
@@ -203,11 +203,11 @@ router.post("/compras/:id/cancelar", permitir("ADMINISTRADOR", "ADMINISTRADOR_SI
   try {
     const compraId = Number(req.params.id);
     const observacaoCancelamento = String(req.body.observacaoCancelamento || "").trim();
-    if (!observacaoCancelamento) throw new Error("Informe a observaÃ§Ã£o do cancelamento.");
+    if (!observacaoCancelamento) throw new Error("Informe a observação do cancelamento.");
     const result = await prisma.$transaction(async tx => {
       const compra = await tx.compra.findUniqueOrThrow({ where: { id: compraId } });
       assertObraAccess(req.usuario, compra.obraId);
-      if (compra.status === "CANCELADA") throw new Error("Esta compra jÃ¡ estÃ¡ cancelada.");
+      if (compra.status === "CANCELADA") throw new Error("Esta compra já está cancelada.");
       const atualizada = await tx.compra.update({ where: { id: compraId }, data: { status: "CANCELADA", observacaoCancelamento, canceladaPorId: req.usuario.id, canceladaEm: new Date() } });
       const pedidos = await tx.pedidoCompra.findMany({ where: { compraId } });
       await tx.pedidoCompra.updateMany({ where: { compraId, status: { not: "CANCELADO" } }, data: { status: "CANCELADO" } });
@@ -229,9 +229,9 @@ router.post("/cotacoes/:id/enviar", async (req, res) => {
   try {
     const id = Number(req.params.id);
     const c = await prisma.cotacaoEnvio.findUnique({ where: { id }, include: { obra: true, itens: { include: { produto: true, aplicacao: true } }, fornecedores: { include: { fornecedor: true } } } });
-    if (!c || !c.fornecedores.length) throw new Error("CotaÃ§Ã£o nÃ£o encontrada ou sem fornecedores.");
+    if (!c || !c.fornecedores.length) throw new Error("Cotação não encontrada ou sem fornecedores.");
     assertObraAccess(req.usuario, c.obraId);
-    if (!["RASCUNHO", "ENVIADA", "EM_ANDAMENTO"].includes(c.status)) throw new Error("Esta cotaÃ§Ã£o nÃ£o pode ser enviada no estado atual.");
+    if (!["RASCUNHO", "ENVIADA", "EM_ANDAMENTO"].includes(c.status)) throw new Error("Esta cotação não pode ser enviada no estado atual.");
     const resultados = await Promise.all(c.fornecedores.map(async p => {
       const aplicacoes = [...new Set(c.itens.map(item => item.aplicacao?.nome).filter(Boolean))];
       const descricaoAplicacoes = aplicacoes.length ? aplicacoes.join(", ") : "Todas as aplica\u00e7\u00f5es";
@@ -287,15 +287,15 @@ router.post("/respostas", async (req, res) => {
     if (frete !== null && (!Number.isFinite(frete) || frete < 0)) throw new Error("Informe um valor de frete válido.");
     const ofertas = itens.map(i => {
       const quantidade = Number(i.quantidadeOfertada ?? 0), valor = Number(i.valorUnitario ?? 0), indisponivel = Boolean(i.indisponivel);
-      if (!Number.isFinite(quantidade) || quantidade < 0 || !Number.isFinite(valor) || valor < 0 || (indisponivel && (quantidade !== 0 || valor !== 0)) || (!indisponivel && quantidade === 0)) throw new Error("Oferta deve ter quantidades e valores nÃ£o negativos; indisponÃ­veis devem usar zero e ofertas disponÃ­veis devem ter quantidade positiva.");
-      if (!i.cotacaoEnvioItemId && !i.adicional) throw new Error("Itens fora da solicitaÃ§Ã£o devem ser marcados como adicionais.");
+      if (!Number.isFinite(quantidade) || quantidade < 0 || !Number.isFinite(valor) || valor < 0 || (indisponivel && (quantidade !== 0 || valor !== 0)) || (!indisponivel && quantidade === 0)) throw new Error("Oferta deve ter quantidades e valores não negativos; indisponíveis devem usar zero e ofertas disponíveis devem ter quantidade positiva.");
+      if (!i.cotacaoEnvioItemId && !i.adicional) throw new Error("Itens fora da solicitação devem ser marcados como adicionais.");
       return { cotacaoEnvioItemId: i.cotacaoEnvioItemId ? Number(i.cotacaoEnvioItemId) : null, produtoId: Number(i.produtoId), quantidadeOfertada: quantidade, valorUnitario: valor, indisponivel, adicional: Boolean(i.adicional), observacao: i.observacao };
     });
-    if (ofertas.some(i => i.cotacaoEnvioItemId && i.adicional)) throw new Error("Uma oferta adicional nÃ£o pode estar vinculada a um item solicitado.");
+    if (ofertas.some(i => i.cotacaoEnvioItemId && i.adicional)) throw new Error("Uma oferta adicional não pode estar vinculada a um item solicitado.");
     const solicitados = await prisma.cotacaoEnvioItem.findMany({ where: { id: { in: ofertas.map(i => i.cotacaoEnvioItemId).filter(Boolean) } }, include: { produto: true } });
-    if (solicitados.some(item => item.cotacaoEnvioId !== Number(cotacaoEnvioId))) throw new Error("Item solicitado nÃ£o pertence Ã  cotaÃ§Ã£o.");
+    if (solicitados.some(item => item.cotacaoEnvioId !== Number(cotacaoEnvioId))) throw new Error("Item solicitado não pertence à cotação.");
     if (ofertas.some(i => i.cotacaoEnvioItemId && solicitados.find(item => item.id === i.cotacaoEnvioItemId)?.produtoId !== i.produtoId)) throw new Error("O produto ofertado deve corresponder ao produto solicitado.");
-    if (!await prisma.cotacaoEnvioFornecedor.findUnique({ where: { cotacaoEnvioId_fornecedorId: { cotacaoEnvioId: Number(cotacaoEnvioId), fornecedorId: Number(fornecedorId) } } })) throw new Error("O fornecedor nÃ£o foi selecionado para esta cotaÃ§Ã£o.");
+    if (!await prisma.cotacaoEnvioFornecedor.findUnique({ where: { cotacaoEnvioId_fornecedorId: { cotacaoEnvioId: Number(cotacaoEnvioId), fornecedorId: Number(fornecedorId) } } })) throw new Error("O fornecedor não foi selecionado para esta cotação.");
     const quote = await prisma.cotacaoEnvio.findUniqueOrThrow({ where: { id: Number(cotacaoEnvioId) } });
     assertObraAccess(req.usuario, quote.obraId);
     const resposta = await prisma.$transaction(async tx => {
@@ -312,8 +312,8 @@ router.patch("/respostas/:id", async (req, res) => {
     const id = Number(req.params.id);
     const current = await prisma.cotacaoResposta.findUniqueOrThrow({ where: { id }, include: { itens: { include: { selecoes: true } }, cotacao: true } });
     assertObraAccess(req.usuario, current.cotacao.obraId);
-    if (!["PREENCHIMENTO", "ENCAMINHADA"].includes(current.status)) throw new Error("Esta resposta nÃ£o pode ser alterada no estado atual.");
-    if (current.itens.some(item => item.selecoes.some(selection => selection.status === "APROVADA"))) throw new Error("A resposta contÃ©m ofertas vinculadas a compra aprovada e nÃ£o pode ser alterada.");
+    if (!["PREENCHIMENTO", "ENCAMINHADA"].includes(current.status)) throw new Error("Esta resposta não pode ser alterada no estado atual.");
+    if (current.itens.some(item => item.selecoes.some(selection => selection.status === "APROVADA"))) throw new Error("A resposta contém ofertas vinculadas a compra aprovada e não pode ser alterada.");
     const frete = req.body.frete === undefined ? current.frete : req.body.frete === "" || req.body.frete == null ? null : Number(req.body.frete);
     if (frete !== null && (!Number.isFinite(frete) || frete < 0)) throw new Error("Informe um valor de frete válido.");
     const row = await prisma.$transaction(async tx => {
@@ -352,10 +352,10 @@ router.patch("/respostas/:respostaId/itens/:itemId", async (req, res) => {
     const item = await prisma.cotacaoRespostaItem.findUniqueOrThrow({ where: { id: itemId } });
     const quote = await prisma.cotacaoEnvio.findUniqueOrThrow({ where: { id: resposta.cotacaoEnvioId } });
     assertObraAccess(req.usuario, quote.obraId);
-    if (!["PREENCHIMENTO", "ENCAMINHADA"].includes(resposta.status) || item.cotacaoRespostaId !== respostaId) throw new Error("Item nÃ£o editÃ¡vel ou nÃ£o pertence Ã  resposta.");
-    if (await prisma.selecaoCompraItem.count({ where: { cotacaoRespostaItemId: itemId, status: "APROVADA" } })) throw new Error("Oferta vinculada a compra aprovada nÃ£o pode ser alterada.");
+    if (!["PREENCHIMENTO", "ENCAMINHADA"].includes(resposta.status) || item.cotacaoRespostaId !== respostaId) throw new Error("Item não editável ou não pertence à resposta.");
+    if (await prisma.selecaoCompraItem.count({ where: { cotacaoRespostaItemId: itemId, status: "APROVADA" } })) throw new Error("Oferta vinculada a compra aprovada não pode ser alterada.");
     const quantidade = Number(req.body.quantidadeOfertada ?? item.quantidadeOfertada), valor = Number(req.body.valorUnitario ?? item.valorUnitario);
-    if (quantidade < 0 || valor < 0 || (req.body.indisponivel && (quantidade !== 0 || valor !== 0))) throw new Error("Quantidade e valor precisam ser nÃ£o negativos; indisponÃ­veis devem usar zero.");
+    if (quantidade < 0 || valor < 0 || (req.body.indisponivel && (quantidade !== 0 || valor !== 0))) throw new Error("Quantidade e valor precisam ser não negativos; indisponíveis devem usar zero.");
     const row = await prisma.$transaction(async tx => {
       const updated = await tx.cotacaoRespostaItem.update({ where: { id: itemId }, data: { ...Object.fromEntries(["cotacaoEnvioItemId", "produtoId", "quantidadeOfertada", "valorUnitario", "indisponivel", "adicional", "observacao"].filter(k => req.body[k] !== undefined).map(k => [k, ["cotacaoEnvioItemId", "produtoId"].includes(k) ? Number(req.body[k]) : req.body[k]])), quantidadeOfertada: quantidade, valorUnitario: valor } });
       await registrarAuditoria(tx, { usuarioId: req.usuario.id, operacao: "ATUALIZAR", entidadeTipo: "CotacaoRespostaItem", entidadeId: itemId, valoresAntes: item, valoresNovos: updated, cotacaoEnvioId: resposta.cotacaoEnvioId });
@@ -386,22 +386,22 @@ router.post("/respostas/:id/encaminhar", async (req, res) => {
     const respostaId = Number(req.params.id);
     const current = await prisma.cotacaoResposta.findUniqueOrThrow({ where: { id: respostaId }, include: { fornecedor: true, cotacao: { include: { obra: true } }, itens: { include: { produto: true } } } });
     assertObraAccess(req.usuario, current.cotacao.obraId);
-    if (current.status !== "PREENCHIMENTO") throw new Error("Esta resposta jÃ¡ foi encaminhada.");
+    if (current.status !== "PREENCHIMENTO") throw new Error("Esta resposta já foi encaminhada.");
     const ids = [...new Set((req.body.destinatarioIds || []).map(Number))];
-    if (!ids.length || ids.some(id => !Number.isInteger(id))) throw new Error("Selecione ao menos um destinatÃ¡rio para enviar a resposta.");
+    if (!ids.length || ids.some(id => !Number.isInteger(id))) throw new Error("Selecione ao menos um destinatário para enviar a resposta.");
     const destinatarios = await prisma.whatsAppDestinatario.findMany({ where: { id: { in: ids }, usuarioId: req.usuario.id, ativo: true }, orderBy: { nome: "asc" } });
-    if (destinatarios.length !== ids.length) throw new Error("Um ou mais destinatÃ¡rios nÃ£o existem, estÃ£o inativos ou nÃ£o pertencem a este usuÃ¡rio.");
+    if (destinatarios.length !== ids.length) throw new Error("Um ou mais destinatários não existem, estão inativos ou não pertencem a este usuário.");
 
     const brl = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" });
     const linhasItens = current.itens.map(item => item.indisponivel
-      ? `â€¢ ${item.produto.nome}: indisponÃ­vel`
-      : `â€¢ ${item.produto.nome}: ${Number(item.quantidadeOfertada)} ${item.produto.unidade} Ã— ${brl.format(Number(item.valorUnitario))} = ${brl.format(Number(item.quantidadeOfertada) * Number(item.valorUnitario))}`);
+      ? `• ${item.produto.nome}: indisponível`
+      : `• ${item.produto.nome}: ${Number(item.quantidadeOfertada)} ${item.produto.unidade} × ${brl.format(Number(item.valorUnitario))} = ${brl.format(Number(item.quantidadeOfertada) * Number(item.valorUnitario))}`);
     const mensagem = [
-      `Resposta da cotaÃ§Ã£o #${String(current.cotacaoEnvioId).padStart(4, "0")}`,
+      `Resposta da cotação #${String(current.cotacaoEnvioId).padStart(4, "0")}`,
       `Obra: ${current.cotacao.obra.nome}`,
       `Fornecedor: ${current.fornecedor.nome}`,
       ...linhasItens,
-      current.observacao ? `ObservaÃ§Ã£o: ${current.observacao}` : null,
+      current.observacao ? `Observação: ${current.observacao}` : null,
     ].filter(Boolean).join("\n");
     const envios = await Promise.all(destinatarios.map(async destinatario => {
       try {
@@ -430,7 +430,7 @@ router.post("/respostas/:id/encaminhar", async (req, res) => {
     });
     const enviados = envios.filter(item => item.status === "ENVIADO");
     const falhas = envios.filter(item => item.status === "FALHOU");
-    if (!updated) return res.status(502).json({ erro: `NÃ£o foi possÃ­vel enviar a resposta por WhatsApp: ${falhas.map(item => `${item.destinatario.nome}: ${item.erro}`).join("; ")}` });
+    if (!updated) return res.status(502).json({ erro: `Não foi possível enviar a resposta por WhatsApp: ${falhas.map(item => `${item.destinatario.nome}: ${item.erro}`).join("; ")}` });
     await notificarUsuario({ usuarioId: current.cotacao.usuarioId, evento: "NOVA_RESPOSTA", entidadeTipo: "CotacaoResposta", entidadeId: respostaId, chaveIdempotencia: `resposta-recebida:${respostaId}`, mensagem: `Uma resposta do fornecedor ${current.fornecedor.nome} foi recebida na cotacao #${current.cotacaoEnvioId}.` }).catch(() => {});
     res.json({ resposta: updated, whatsapp: { enviados: enviados.map(item => item.destinatario.nome), falhas: falhas.map(item => ({ nome: item.destinatario.nome, erro: item.erro })) } });
   } catch (e) { fail(res, e); }
@@ -444,11 +444,11 @@ router.patch("/compras/ofertas/:id/quantidade-ofertada", permitir("ADMINISTRADOR
 
     const oferta = await prisma.cotacaoRespostaItem.findUniqueOrThrow({ where: { id }, include: { resposta: true } });
     if (oferta.resposta.status !== "ENCAMINHADA" || oferta.status !== "PENDENTE" || oferta.indisponivel) {
-      throw new Error("Somente ofertas encaminhadas e ainda sem decisÃ£o podem ser editadas.");
+      throw new Error("Somente ofertas encaminhadas e ainda sem decisão podem ser editadas.");
     }
 
     const aprovada = await prisma.selecaoCompraItem.aggregate({ where: { status: "APROVADA", cotacaoRespostaItemId: id }, _sum: { quantidadeAprovada: true } });
-    if (Number(aprovada._sum.quantidadeAprovada || 0) > quantidadeOfertada) throw new Error("A quantidade ofertada nÃ£o pode ficar abaixo da quantidade jÃ¡ aprovada.");
+    if (Number(aprovada._sum.quantidadeAprovada || 0) > quantidadeOfertada) throw new Error("A quantidade ofertada não pode ficar abaixo da quantidade já aprovada.");
 
     res.json(await prisma.cotacaoRespostaItem.update({ where: { id }, data: { quantidadeOfertada } }));
   } catch (e) { fail(res, e); }
@@ -458,25 +458,25 @@ router.post("/compras/aprovar", permitir("ADMINISTRADOR", "ADMINISTRADOR_SISTEMA
   try {
     const { cotacaoEnvioId, itens } = req.body;
     const usuario = await prisma.usuario.findUnique({ where: { id: req.usuario.id }, select: { nome: true, email: true } });
-    if (!Array.isArray(itens) || !itens.length) throw new Error("Informe itens para decisÃ£o.");
+    if (!Array.isArray(itens) || !itens.length) throw new Error("Informe itens para decisão.");
     const compra = await prisma.$transaction(async tx => {
       const cotacao = await tx.cotacaoEnvio.findUniqueOrThrow({ where: { id: Number(cotacaoEnvioId) }, include: { itens: true, fornecedores: true, respostas: { include: { itens: true } } } });
       assertObraAccess(req.usuario, cotacao.obraId);
-      if (!["EM_ANDAMENTO", "ENVIADA"].includes(cotacao.status)) throw new Error("A cotaÃ§Ã£o nÃ£o estÃ¡ disponÃ­vel para anÃ¡lise de compra.");
+      if (!["EM_ANDAMENTO", "ENVIADA"].includes(cotacao.status)) throw new Error("A cotação não está disponível para análise de compra.");
       const c = await tx.compra.upsert({ where: { cotacaoEnvioId: cotacao.id }, update: {}, create: { obraId: cotacao.obraId, cotacaoEnvioId: cotacao.id, solicitanteId: cotacao.usuarioId } });
       const seen = new Set();
       for (const decision of itens) {
-        if (seen.has(String(decision.ofertaId))) throw new Error("Cada oferta deve aparecer uma Ãºnica vez por decisÃ£o.");
+        if (seen.has(String(decision.ofertaId))) throw new Error("Cada oferta deve aparecer uma única vez por decisão.");
         seen.add(String(decision.ofertaId));
         const oferta = await tx.cotacaoRespostaItem.findUniqueOrThrow({ where: { id: Number(decision.ofertaId) }, include: { resposta: true } });
-        if (oferta.resposta.cotacaoEnvioId !== cotacao.id) throw new Error("Oferta nÃ£o pertence Ã  cotaÃ§Ã£o informada.");
-        if (oferta.cotacaoEnvioItemId && !cotacao.itens.some(i => i.id === oferta.cotacaoEnvioItemId)) throw new Error("Item solicitado nÃ£o pertence Ã  cotaÃ§Ã£o.");
+        if (oferta.resposta.cotacaoEnvioId !== cotacao.id) throw new Error("Oferta não pertence à cotação informada.");
+        if (oferta.cotacaoEnvioItemId && !cotacao.itens.some(i => i.id === oferta.cotacaoEnvioItemId)) throw new Error("Item solicitado não pertence à cotação.");
         const qtd = Number(decision.quantidadeAprovada || 0), unit = Number(decision.valorUnitarioAprovado ?? oferta.valorUnitario);
         if (decision.status === "REJEITADA") {
           await tx.selecaoCompraItem.create({ data: { compraId: c.id, cotacaoRespostaItemId: oferta.id, quantidadeAprovada: 0, valorUnitarioAprovado: unit, aprovadorId: req.usuario.id, status: "REJEITADA" } });
           await tx.cotacaoRespostaItem.update({ where: { id: oferta.id }, data: { status: "REJEITADA" } }); continue;
         }
-        if (oferta.indisponivel || qtd <= 0 || qtd > Number(oferta.quantidadeOfertada) || unit < 0) throw new Error("Quantidade ou valor aprovado invÃ¡lido.");
+        if (oferta.indisponivel || qtd <= 0 || qtd > Number(oferta.quantidadeOfertada) || unit < 0) throw new Error("Quantidade ou valor aprovado inválido.");
         const aprovadoOferta = await tx.selecaoCompraItem.aggregate({ where: { status: "APROVADA", cotacaoRespostaItemId: oferta.id }, _sum: { quantidadeAprovada: true } });
         if (Number(aprovadoOferta._sum.quantidadeAprovada || 0) + qtd > Number(oferta.quantidadeOfertada)) throw new Error("A soma aprovada excede a quantidade ofertada.");
         if (oferta.cotacaoEnvioItemId) {
@@ -518,10 +518,10 @@ router.post("/compras/aprovar", permitir("ADMINISTRADOR", "ADMINISTRADOR_SISTEMA
     const notificacoes = await Promise.all([...grupos.values()].map(async selecoes => {
       const fornecedor = selecoes[0].oferta.resposta.fornecedor;
       const aplicacoes = [...new Set(selecoes.map(selecao => selecao.oferta.itemSolicitado?.aplicacao?.nome).filter(Boolean))];
-      const linhasAplicacoes = aplicacoes.length ? aplicacoes.map(nome => `* ${nome}`) : ["*Todas as aplicaÃ§Ãµes"];
+      const linhasAplicacoes = aplicacoes.length ? aplicacoes.map(nome => `* ${nome}`) : ["*Todas as aplicações"];
       const linhasProdutos = selecoes.map(selecao => `* ${selecao.oferta.produto.nome}: ${selecao.quantidadeAprovada} ${selecao.oferta.produto.unidade}`);
       const mensagem = [
-        "OlÃ¡!",
+        "Olá!",
         "",
         "*Faturamento autorizado!*",
         "",
@@ -532,13 +532,13 @@ router.post("/compras/aprovar", permitir("ADMINISTRADOR", "ADMINISTRADOR_SISTEMA
         "*Produtos:*",
         ...linhasProdutos,
         "",
-        "*ObservaÃ§Ãµes:*",
+        "*Observações:*",
         compra.cotacao.observacao || "Nenhuma.",
         "",
-        "Por gentileza, solicite Ã  equipe responsÃ¡vel que inclua as seguintes informaÃ§Ãµes no *rodapÃ© da nota fiscal*: ",
+        "Por gentileza, solicite à equipe responsável que inclua as seguintes informações no *rodapé da nota fiscal*: ",
         "",
         `*Obra:* ${compra.obra.nome}`,
-        `*AplicaÃ§Ãµes:* ${aplicacoes.length ? aplicacoes.join(", ") : "Todas as aplicaÃ§Ãµes"}`,
+        `*Aplicações:* ${aplicacoes.length ? aplicacoes.join(", ") : "Todas as aplicações"}`,
         "",
         "Atenciosamente,",
         usuario?.nome || "Equipe de compras",
@@ -568,7 +568,7 @@ router.post("/compras/:id/pedidos", permitir("ADMINISTRADOR", "ADMINISTRADOR_SIS
       assertObraAccess(req.usuario, compra.obraId);
       if (compra.status === "CANCELADA" || !compra.aprovadaEm) throw new Error("A compra precisa estar aprovada e ativa para gerar pedidos.");
       const aprovados = await tx.selecaoCompraItem.findMany({ where: { compraId, status: "APROVADA" }, include: { oferta: { include: { resposta: true } } } });
-      if (!aprovados.length) throw new Error("A compra nÃ£o possui itens aprovados.");
+      if (!aprovados.length) throw new Error("A compra não possui itens aprovados.");
       const grupos = Map.groupBy(aprovados, s => String(s.oferta.resposta.fornecedorId));
       for (const [fornecedorId, selecoes] of grupos) {
         const pedido = await tx.pedidoCompra.upsert({ where: { compraId_fornecedorId: { compraId, fornecedorId: Number(fornecedorId) } }, update: {}, create: { compraId, fornecedorId: Number(fornecedorId) } });
@@ -589,9 +589,9 @@ router.post("/compras/:id/encerrar-analise", permitir("ADMINISTRADOR", "ADMINIST
     const compra = await prisma.$transaction(async tx => {
       const current = await tx.compra.findUniqueOrThrow({ where: { id: compraId }, include: { cotacao: { include: { fornecedores: true, respostas: true } } } });
       assertObraAccess(req.usuario, current.obraId);
-      if (await tx.selecaoCompraItem.count({ where: { compraId, status: "APROVADA" } })) throw new Error("A cotaÃ§Ã£o jÃ¡ possui itens aprovados e nÃ£o pode ser encerrada sem compra.");
+      if (await tx.selecaoCompraItem.count({ where: { compraId, status: "APROVADA" } })) throw new Error("A cotação já possui itens aprovados e não pode ser encerrada sem compra.");
       if (respostasEstaoPendentes(current.cotacao.respostas, current.cotacao.fornecedores)) throw new Error("Existem respostas de fornecedores pendentes.");
-      if (await tx.cotacaoRespostaItem.count({ where: { resposta: { cotacaoEnvioId: current.cotacaoEnvioId }, status: "PENDENTE" } })) throw new Error("Existem ofertas pendentes de anÃ¡lise.");
+      if (await tx.cotacaoRespostaItem.count({ where: { resposta: { cotacaoEnvioId: current.cotacaoEnvioId }, status: "PENDENTE" } })) throw new Error("Existem ofertas pendentes de análise.");
       const status = validarTransicaoCotacao(current.cotacao.status, "ENCERRADA", { respostasPendentes: false });
       await tx.cotacaoResposta.updateMany({ where: { cotacaoEnvioId: current.cotacaoEnvioId, status: "ENCAMINHADA" }, data: { status: "ENCERRADA" } });
       const cotacao = await tx.cotacaoEnvio.update({ where: { id: current.cotacaoEnvioId }, data: { status } });
@@ -666,7 +666,7 @@ router.post("/pedidos/itens/:id/recebimentos", async (req, res) => {
       assertObraAccess(req.usuario, item.pedido.compra.obraId);
       if (item.statusEntrega === "CANCELADA") throw new Error("Não é possível receber um item com entrega cancelada.");
       const anterior = await tx.recebimentoItem.aggregate({ where: { pedidoCompraItemId: itemId }, _sum: { quantidadeRecebida: true } });
-      if (quantidadeRecebida <= 0 || Number(anterior._sum.quantidadeRecebida || 0) + quantidadeRecebida > Number(item.quantidade)) throw new Error("Quantidade recebida invÃ¡lida ou acima do saldo do pedido.");
+      if (quantidadeRecebida <= 0 || Number(anterior._sum.quantidadeRecebida || 0) + quantidadeRecebida > Number(item.quantidade)) throw new Error("Quantidade recebida inválida ou acima do saldo do pedido.");
       const recebimento = await tx.recebimentoItem.create({ data: { pedidoCompraItemId: itemId, quantidadeRecebida, usuarioId: req.usuario.id, observacao: req.body.observacao } });
       const itemTotal = Number(anterior._sum.quantidadeRecebida || 0) + quantidadeRecebida;
       const itemEntregue = itemTotal >= Number(item.quantidade);
@@ -690,14 +690,14 @@ router.post("/pedidos/:id/recebimentos", async (req, res) => {
     const { itens, dataRecebimento, observacao } = req.body;
     if (!Array.isArray(itens) || !itens.length) throw new Error("Informe os produtos recebidos.");
     const data = dataRecebimento ? new Date(`${dataRecebimento}T12:00:00`) : new Date();
-    if (Number.isNaN(data.getTime())) throw new Error("Informe uma data de recebimento vÃ¡lida.");
+    if (Number.isNaN(data.getTime())) throw new Error("Informe uma data de recebimento válida.");
 
     const result = await prisma.$transaction(async tx => {
       const pedido = await tx.pedidoCompra.findUniqueOrThrow({ where: { id: pedidoId }, include: { compra: true, itens: { include: { recebimentos: true } } } });
       assertObraAccess(req.usuario, pedido.compra.obraId);
-      if (pedido.status === "CANCELADO") throw new Error("NÃ£o Ã© possÃ­vel registrar recebimento de um pedido cancelado.");
+      if (pedido.status === "CANCELADO") throw new Error("Não é possível registrar recebimento de um pedido cancelado.");
       const ids = itens.map(item => Number(item.pedidoCompraItemId));
-      if (new Set(ids).size !== ids.length || ids.some(id => !pedido.itens.some(item => item.id === id))) throw new Error("HÃ¡ produtos invÃ¡lidos ou repetidos neste recebimento.");
+      if (new Set(ids).size !== ids.length || ids.some(id => !pedido.itens.some(item => item.id === id))) throw new Error("Há produtos inválidos ou repetidos neste recebimento.");
 
       const registros = [];
       for (const entrada of itens) {
@@ -705,7 +705,7 @@ router.post("/pedidos/:id/recebimentos", async (req, res) => {
         if (item.statusEntrega === "CANCELADA") throw new Error("Não é possível receber um item com entrega cancelada.");
         const quantidade = Number(entrada.quantidadeRecebida);
         const jaRecebida = item.recebimentos.reduce((sum, registro) => sum + Number(registro.quantidadeRecebida), 0);
-        if (!Number.isFinite(quantidade) || quantidade < 0 || jaRecebida + quantidade > Number(item.quantidade)) throw new Error("Uma das quantidades recebidas Ã© invÃ¡lida ou maior que o saldo do pedido.");
+        if (!Number.isFinite(quantidade) || quantidade < 0 || jaRecebida + quantidade > Number(item.quantidade)) throw new Error("Uma das quantidades recebidas é inválida ou maior que o saldo do pedido.");
         if (quantidade > 0) {
           const registro = await tx.recebimentoItem.create({ data: { pedidoCompraItemId: item.id, quantidadeRecebida: quantidade, dataRecebimento: data, usuarioId: req.usuario.id, observacao } });
           registros.push(registro);
@@ -723,7 +723,7 @@ router.post("/pedidos/:id/recebimentos", async (req, res) => {
       const status = concluido ? "RECEBIDO" : iniciado ? "PARCIALMENTE_RECEBIDO" : pedido.status;
       const pedidoAtualizado = await tx.pedidoCompra.update({ where: { id: pedidoId }, data: { status } });
       for (const registro of registros) await registrarAuditoria(tx, { usuarioId: req.usuario.id, operacao: "REGISTRAR_RECEBIMENTO", entidadeTipo: "RecebimentoItem", entidadeId: registro.id, valoresNovos: registro, compraId: pedido.compraId, pedidoCompraId: pedidoId });
-      for (const registro of registros) await tx.historicoStatus.create({ data: { entidadeTipo: "RecebimentoItem", entidadeId: registro.id, statusNovo: status, usuarioId: req.usuario.id, pedidoCompraId: pedidoId, observacao: `Recebimento de ${registro.quantidadeRecebida}${observacao ? ` Â· ${observacao}` : ""}` } });
+      for (const registro of registros) await tx.historicoStatus.create({ data: { entidadeTipo: "RecebimentoItem", entidadeId: registro.id, statusNovo: status, usuarioId: req.usuario.id, pedidoCompraId: pedidoId, observacao: `Recebimento de ${registro.quantidadeRecebida}${observacao ? ` · ${observacao}` : ""}` } });
       await concluirCompraSePronta(tx, pedido.compraId, req.usuario.id);
       return { pedido: pedidoAtualizado, recebimentos: registros };
     });
@@ -764,9 +764,9 @@ router.get("/relatorios/gastos", async (req, res) => {
       res.setHeader("Content-Type", "application/pdf");
       res.setHeader("Content-Disposition", "attachment; filename=relatorio-gastos.pdf");
       const pdf = new PDFDocument({ margin: 40, size: "A4", layout: "landscape" });
-      pdf.pipe(res); pdf.fontSize(18).text("RelatÃ³rio de gastos", { align: "center" });
-      pdf.moveDown().fontSize(9).text(`Filtros: obra=${req.query.obraId || "todas"}; perÃ­odo=${req.query.de || "inÃ­cio"} atÃ© ${req.query.ate || "hoje"}; agrupamento=${chave}`);
-      pdf.moveDown().fontSize(10).text("Obra | Fornecedor | Produto | Quantidade | UnitÃ¡rio | Total | Data");
+      pdf.pipe(res); pdf.fontSize(18).text("Relatório de gastos", { align: "center" });
+      pdf.moveDown().fontSize(9).text(`Filtros: obra=${req.query.obraId || "todas"}; período=${req.query.de || "início"} até ${req.query.ate || "hoje"}; agrupamento=${chave}`);
+      pdf.moveDown().fontSize(10).text("Obra | Fornecedor | Produto | Quantidade | Unitário | Total | Data");
       for (const x of linhas) {
         if (pdf.y > 520) pdf.addPage();
         pdf.fontSize(8).text(`${x.obra} | ${x.fornecedor} | ${x.produto} | ${x.quantidade} | R$ ${x.valorUnitario.toFixed(2)} | R$ ${x.total.toFixed(2)} | ${x.data.slice(0,10)}`);
@@ -823,7 +823,7 @@ router.get("/relatorios/cotacoes", async (req, res) => {
     }
     if (req.query.formato === "pdf") {
       res.setHeader("Content-Type", "application/pdf"); res.setHeader("Content-Disposition", "attachment; filename=relatorio-cotacoes.pdf");
-      const pdf = new PDFDocument({ margin: 40, size: "A4", layout: "landscape" }); pdf.pipe(res); pdf.fontSize(18).text("Comparativo de cotaÃ§Ãµes", { align: "center" }); pdf.moveDown().fontSize(9).text(`Filtros: obra=${req.query.obraId || "todas"}; produto=${req.query.produtoId || "todos"}; perÃ­odo=${req.query.de || "inÃ­cio"} atÃ© ${req.query.ate || "hoje"}`); pdf.moveDown().fontSize(10).text("CotaÃ§Ã£o | Obra | Produto | Fornecedor | Qtd. solicitada | Qtd. ofertada | UnitÃ¡rio | Total | SituaÃ§Ã£o");
+      const pdf = new PDFDocument({ margin: 40, size: "A4", layout: "landscape" }); pdf.pipe(res); pdf.fontSize(18).text("Comparativo de cotações", { align: "center" }); pdf.moveDown().fontSize(9).text(`Filtros: obra=${req.query.obraId || "todas"}; produto=${req.query.produtoId || "todos"}; período=${req.query.de || "início"} até ${req.query.ate || "hoje"}`); pdf.moveDown().fontSize(10).text("Cotação | Obra | Produto | Fornecedor | Qtd. solicitada | Qtd. ofertada | Unitário | Total | Situação");
       for (const x of rows) { if (pdf.y > 520) pdf.addPage(); pdf.fontSize(8).text(`${x.cotacaoId} | ${x.obra} | ${x.produto} | ${x.fornecedor} | ${x.solicitada} ${x.unidade} | ${x.ofertada} | R$ ${x.valorUnitario.toFixed(2)} | R$ ${x.total.toFixed(2)} | ${x.disponibilidade}`); }
       pdf.end(); return;
     }
@@ -839,7 +839,7 @@ router.get("/historico", async (req, res) => {
     if (tipo === "CotacaoEnvio") obraId = (await prisma.cotacaoEnvio.findUniqueOrThrow({ where: { id }, select: { obraId: true } })).obraId;
     else if (tipo === "Compra") obraId = (await prisma.compra.findUniqueOrThrow({ where: { id }, select: { obraId: true } })).obraId;
     else if (tipo === "PedidoCompra") obraId = (await prisma.pedidoCompra.findUniqueOrThrow({ where: { id }, select: { compra: { select: { obraId: true } } } })).compra.obraId;
-    else if (!isAdminUser(req.usuario)) throw Object.assign(new Error("Somente administradores podem consultar este histÃ³rico."), { status: 403 });
+    else if (!isAdminUser(req.usuario)) throw Object.assign(new Error("Somente administradores podem consultar este histórico."), { status: 403 });
     if (obraId != null) assertObraAccess(req.usuario, obraId);
     const [historico, auditoria] = await Promise.all([
       prisma.historicoStatus.findMany({ where: { entidadeTipo: tipo, entidadeId: id }, include: { usuario: { select: { id: true, nome: true } } }, orderBy: { dataHora: "desc" }, take: Math.min(Number(req.query.limite) || 100, 500) }),

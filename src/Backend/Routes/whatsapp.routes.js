@@ -3,7 +3,10 @@ import { prisma } from "../prisma/lib/prisma.ts";
 import { wppConnectSessions } from "../Services/wppconnect-session.service.js";
 
 const router = Router();
-const sessionError = (res, error) => res.status(error.status || (error.code === "P2025" ? 404 : 502)).json({ erro: error.message || "Falha na integração com WhatsApp." });
+const sessionError = (res, error) => {
+  const status = error.status === 401 ? 502 : error.status || (error.code === "P2025" ? 404 : 502);
+  return res.status(status).json({ erro: error.message || "Falha na integração com WhatsApp." });
+};
 
 router.get("/sessao", async (req, res) => {
   try { res.json(await wppConnectSessions.status(req.usuario.id)); }
@@ -11,7 +14,7 @@ router.get("/sessao", async (req, res) => {
 });
 
 router.post("/sessao/conectar", async (req, res) => {
-  try { res.json(await wppConnectSessions.connect(req.usuario.id)); }
+  try { res.json(await wppConnectSessions.connect(req.usuario.id, { restart: true })); }
   catch (error) { sessionError(res, error); }
 });
 

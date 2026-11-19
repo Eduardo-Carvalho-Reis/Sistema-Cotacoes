@@ -8,7 +8,7 @@ const router = Router();
 const resource = (path, model, fields, { soft = true, secret = false } = {}) => {
   const r = Router();
   const admin = (req, res) => {
-    if (["usuario", "perfil"].includes(model) && !isAdminUser(req.usuario)) {
+    if (model === "perfil" && !isAdminUser(req.usuario)) {
       res.status(403).json({ erro: "Permissao insuficiente." });
       return false;
     }
@@ -20,7 +20,7 @@ const resource = (path, model, fields, { soft = true, secret = false } = {}) => 
     try {
       if (!admin(req, res)) return;
       const where = {
-        ...(model !== "usuario" ? { ativo: true } : {}),
+        ...(!["usuario", "perfil"].includes(model) ? { ativo: true } : {}),
         ...(model === "obra" && !isAdminUser(req.usuario) ? { id: req.usuario.obraId || -1 } : {}),
       };
       res.json(await prisma[model].findMany({
@@ -36,6 +36,7 @@ const resource = (path, model, fields, { soft = true, secret = false } = {}) => 
   r.get("/:id", async (req, res) => {
     try {
       if (!admin(req, res)) return;
+      if (model === "usuario" && !isAdminUser(req.usuario) && Number(req.params.id) !== req.usuario.id) return res.status(403).json({ erro: "Permissao insuficiente." });
       const row = await prisma[model].findUniqueOrThrow({ where: { id: Number(req.params.id) }, ...(secret ? { omit: { senhaHash: true } } : {}) });
       if (model === "obra" && !isAdminUser(req.usuario) && row.id !== req.usuario.obraId) return res.status(403).json({ erro: "Permissao insuficiente." });
       res.json(row);
@@ -44,7 +45,7 @@ const resource = (path, model, fields, { soft = true, secret = false } = {}) => 
 
   r.post("/", async (req, res) => {
     try {
-      if (!admin(req, res) || !canWrite(req, res)) return;
+      if ((secret && !isAdminUser(req.usuario)) || !admin(req, res) || !canWrite(req, res)) return res.status(403).json({ erro: "Permissao insuficiente." });
       const data = Object.fromEntries(fields.filter(k => req.body[k] !== undefined).map(k => [k, req.body[k]]));
       if (secret) {
         if (typeof req.body.senha !== "string" || req.body.senha.length < 10) throw new Error("Initial password must have at least 10 characters.");
@@ -65,12 +66,14 @@ const resource = (path, model, fields, { soft = true, secret = false } = {}) => 
 
   r.patch("/:id", async (req, res) => {
     try {
-      if (!admin(req, res) || !canWrite(req, res)) return;
       const id = Number(req.params.id);
-      const data = Object.fromEntries(fields.filter(k => req.body[k] !== undefined).map(k => [k, req.body[k]]));
+      const selfEdit = secret && id === req.usuario.id && !isAdminUser(req.usuario);
+      if ((!selfEdit && !admin(req, res)) || !canWrite(req, res)) return res.status(403).json({ erro: "Permissao insuficiente." });
+      const allowedFields = selfEdit ? ["nome", "cpf", "telefone"] : fields;
+      const data = Object.fromEntries(allowedFields.filter(k => req.body[k] !== undefined).map(k => [k, req.body[k]]));
       const row = await prisma.$transaction(async tx => {
         const before = await tx[model].findUniqueOrThrow({ where: { id }, ...(secret ? { omit: { senhaHash: true } } : {}) });
-        if (secret) {
+        if (secret && !selfEdit) {
           if (req.body.senha !== undefined) {
             if (typeof req.body.senha !== "string" || req.body.senha.length < 10) throw new Error("Password must have at least 10 characters.");
             data.senhaHash = await bcrypt.hash(req.body.senha, 12);
@@ -93,7 +96,7 @@ const resource = (path, model, fields, { soft = true, secret = false } = {}) => 
 
   r.delete("/:id", async (req, res) => {
     try {
-      if (!admin(req, res) || !canWrite(req, res)) return;
+      if ((secret && !isAdminUser(req.usuario)) || !admin(req, res) || !canWrite(req, res)) return res.status(403).json({ erro: "Permissao insuficiente." });
       const id = Number(req.params.id);
       const row = secret ? await prisma.$transaction(async tx => {
         const before = await tx[model].findUniqueOrThrow({ where: { id }, omit: { senhaHash: true } });
@@ -112,7 +115,7 @@ resource("/obras", "obra", ["nome", "endereco", "ativo"]);
 resource("/categorias-produto", "categoriaProduto", ["nome", "descricao", "ativo"]);
 resource("/equipamentos", "equipamento", ["nome", "chassi", "potenciaCapacidade", "ano", "placa", "ativo"]);
 resource("/aplicacoes", "aplicacao", ["nome", "tipo", "equipamentoId", "ativo"]);
-resource("/usuarios", "usuario", ["nome", "cpf", "email", "perfilId", "obraId", "ativo"], { secret: true });
+resource("/usuarios", "usuario", ["nome", "cpf", "telefone", "email", "perfilId", "obraId", "ativo"], { secret: true });
 resource("/perfis", "perfil", ["nome", "descricao"], { soft: false });
 
 router.post("/usuarios/:id/redefinir-senha", async (req, res) => {
