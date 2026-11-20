@@ -11,6 +11,7 @@ function WhatsApp({ api, notify }) {
   const [session, setSession] = useState({ configurado: false, status: 'NAO_CONECTADO', conectado: false, qrCode: null });
   const [sessionBusy, setSessionBusy] = useState(false);
   const [notifications, setNotifications] = useState([]);
+  const [showAllNotifications, setShowAllNotifications] = useState(false);
 
   const load = useCallback(async () => {
     setLoading(true);
@@ -77,6 +78,7 @@ function WhatsApp({ api, notify }) {
   };
 
   const active = destinatarios.filter(item => item.ativo);
+  const visibleNotifications = showAllNotifications ? notifications : notifications.slice(0, 5);
   return <>
     <PageTitle eyebrow="ENVIO DE MENSAGENS" title="WhatsApp" description="Configure sua lista pessoal de destinatários para as respostas das cotações." />
     <section className={`panel whatsapp-provider-state ${providerReady ? 'ready' : 'missing'}`}>
@@ -96,7 +98,7 @@ function WhatsApp({ api, notify }) {
     </section>
     <section className="panel whatsapp-recipients notification-history">
       <div className="panel-heading"><div><span className="eyebrow">AUTOMAÇÕES</span><h2>Histórico de notificações</h2></div><span className="result-count">{notifications.length}</span></div>
-      {notifications.length ? <div className="whatsapp-recipient-list">{notifications.map(item => <div className="whatsapp-recipient" key={item.id}><span className="whatsapp-recipient-copy"><b>{item.evento.replaceAll('_', ' ')} · {item.entidadeTipo} #{item.entidadeId}</b><span>{item.destinatarioNome || item.telefone || 'Sem destinatário'} · {new Date(item.criadoEm).toLocaleString('pt-BR')} · {item.status} · {item.tentativas} tentativa(s){item.erro ? ` · ${item.erro}` : ''}</span></span>{item.status === 'FALHOU' && <Button type="button" variant="secondary" onClick={() => retryNotification(item)}>Tentar novamente</Button>}</div>)}</div> : <div className="whatsapp-loading">As notificações automáticas e suas tentativas aparecerão aqui.</div>}
+      {notifications.length ? <><div className="whatsapp-recipient-list">{visibleNotifications.map(item => <div className="whatsapp-recipient" key={item.id}><span className="whatsapp-recipient-copy"><b>{item.evento.replaceAll('_', ' ')} · {item.entidadeTipo} #{item.entidadeId}</b><span>{item.destinatarioNome || item.telefone || 'Sem destinatário'} · {new Date(item.criadoEm).toLocaleString('pt-BR')} · {item.status} · {item.tentativas} tentativa(s){item.erro ? ` · ${item.erro}` : ''}</span></span>{item.status === 'FALHOU' && <Button type="button" variant="secondary" onClick={() => retryNotification(item)}>Tentar novamente</Button>}</div>)}</div>{notifications.length > 5 && <div className="whatsapp-history-actions"><Button type="button" variant="secondary" onClick={() => setShowAllNotifications(current => !current)}>{showAllNotifications ? 'Mostrar menos' : 'Mais'}</Button></div>}</> : <div className="whatsapp-loading">As notificações automáticas e suas tentativas aparecerão aqui.</div>}
     </section>
     <div className="whatsapp-layout">
       <form className="panel whatsapp-form" onSubmit={addRecipient}>

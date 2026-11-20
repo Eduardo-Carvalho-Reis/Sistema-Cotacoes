@@ -12,6 +12,9 @@ import { calcularRankingFornecedores, agruparGastosPorObraMes, agruparGastosPorC
 const router = Router();
 const whatsapp = new WhatsAppProvider();
 const fail = (res, e) => res.status(e.status || (e.code === "P2025" ? 404 : e.code === "P2002" ? 409 : 400)).json({ erro: e.message });
+const assertCotacaoNaoConcluida = cotacao => {
+  if (cotacao.status === "CONCLUIDA") throw new Error("A cotação foi concluída e não permite novas ações.");
+};
 
 async function concluirCompraSePronta(tx, compraId, usuarioId) {
   const compra = await tx.compra.findUniqueOrThrow({ where: { id: compraId } });
@@ -46,9 +49,9 @@ async function salvarNotaFiscal(tx, { compraId, pedidoCompraId, usuarioId, dados
   const dataEmissao = new Date(dados.dataEmissao);
   if (!numero || !Number.isFinite(valorTotal) || valorTotal < 0 || Number.isNaN(dataEmissao.getTime())) throw new Error("Informe número, data de emissão e valor válidos para a nota fiscal.");
   const before = await tx.notaFiscal.findFirst({ where: { compraId, ativa: true } });
-  const payload = { numero, chaveAcesso: dados.chaveAcesso || null, dataEmissao, valorTotal, arquivoReferencia: dados.arquivoReferencia || null, dataRegistro: new Date(), ativa: true };
+  const payload = { numero, dataEmissao, valorTotal, dataRegistro: new Date(), ativa: true };
   if (before) {
-    await tx.historicoNotaFiscal.create({ data: { notaFiscalId: before.id, compraId, usuarioId, numero: before.numero, chaveAcesso: before.chaveAcesso, dataEmissao: before.dataEmissao, valorTotal: before.valorTotal, arquivoReferencia: before.arquivoReferencia, dataRegistro: before.dataRegistro } });
+    await tx.historicoNotaFiscal.create({ data: { notaFiscalId: before.id, compraId, usuarioId, numero: before.numero, dataEmissao: before.dataEmissao, valorTotal: before.valorTotal, dataRegistro: before.dataRegistro } });
     const updated = await tx.notaFiscal.update({ where: { id: before.id }, data: { ...payload, pedidoCompraId } });
     await registrarAuditoria(tx, { usuarioId, operacao: "EDITAR_NOTA_FISCAL", entidadeTipo: "NotaFiscal", entidadeId: updated.id, valoresAntes: before, valoresNovos: updated, compraId });
     return updated;
@@ -132,6 +135,7 @@ router.post("/cotacoes/:id/cancelar", async (req, res) => {
     const result = await prisma.$transaction(async tx => {
       const atual = await tx.cotacaoEnvio.findUniqueOrThrow({ where: { id }, include: { respostas: true, compras: true } });
       assertObraAccess(req.usuario, atual.obraId);
+      assertCotacaoNaoConcluida(atual);
       validarTransicaoCotacao(atual.status, "CANCELADA");
       if (atual.compras.some(c => c.status !== "CANCELADA")) throw new Error("Cancele a compra vinculada antes de cancelar a cotação.");
       const row = await tx.cotacaoEnvio.update({ where: { id }, data: { status: "CANCELADA", cancelamentoMotivo: motivo, canceladaEm: new Date(), canceladaPorId: req.usuario.id } });
@@ -149,12 +153,14 @@ router.delete("/cotacoes/:id", async (req, res) => {
     const current = await prisma.cotacaoEnvio.findUniqueOrThrow({ where: { id }, include: { obra: true } });
     assertObraAccess(req.usuario, current.obraId);
     if (current.status !== "RASCUNHO") throw new Error("Somente cotações em rascunho podem ser excluídas.");
-    const [respostas, compras, historicos, auditorias] = await Promise.all([
-      prisma.cotacaoResposta.count({ where: { cotacaoEnvioId: id } }), prisma.compra.count({ where: { cotacaoEnvioId: id } }),
-      prisma.historicoStatus.count({ where: { cotacaoEnvioId: id } }), prisma.auditoria.count({ where: { cotacaoEnvioId: id } }),
+    const [respostas, compras] = await Promise.all([
+      prisma.cotacaoResposta.count({ where: { cotacaoEnvioId: id } }),
+      prisma.compra.count({ where: { cotacaoEnvioId: id } }),
     ]);
-    if (respostas || compras || historicos || auditorias) throw new Error("A cotação possui histórico ou vínculos e não pode ser excluída.");
+    if (respostas || compras) throw new Error("A cotação possui respostas ou compras vinculadas e não pode ser excluída.");
     await prisma.$transaction(async tx => {
+      const envios = await tx.cotacaoEnvioFornecedor.findMany({ where: { cotacaoEnvioId: id }, select: { id: true } });
+      await tx.historicoEnvioMensagem.deleteMany({ where: { cotacaoEnvioFornecedorId: { in: envios.map(item => item.id) } } });
       await tx.cotacaoEnvioFornecedor.deleteMany({ where: { cotacaoEnvioId: id } });
       await tx.cotacaoEnvioItem.deleteMany({ where: { cotacaoEnvioId: id } });
       await tx.cotacaoEnvio.delete({ where: { id } });
@@ -173,10 +179,11 @@ router.get("/cotacoes/:id/comparativo", async (req, res) => {
 
 router.get("/compras", async (req, res) => {
   try {
-    await prisma.pedidoCompraItem.updateMany({ where: { statusEntrega: { in: ["PENDENTE", "PARCIALMENTE_ENTREGUE"] }, dataPrevistaEntrega: { lt: new Date() }, pedido: { compra: obraScope(req.usuario) } }, data: { statusEntrega: "ATRASADA" } });
+    const escopoCompras = req.usuario.perfil === "USUARIO_PADRAO" ? {} : obraScope(req.usuario);
+    await prisma.pedidoCompraItem.updateMany({ where: { statusEntrega: { in: ["PENDENTE", "PARCIALMENTE_ENTREGUE"] }, dataPrevistaEntrega: { lt: new Date() }, pedido: { compra: escopoCompras } }, data: { statusEntrega: "ATRASADA" } });
     res.json(await prisma.compra.findMany({
       where: {
-        ...obraScope(req.usuario),
+        ...escopoCompras,
         ...(isAdminUser(req.usuario) && req.query.obraId ? { obraId: Number(req.query.obraId) } : {}),
         status: req.query.status || undefined,
         dataCriacao: req.query.de || req.query.ate ? { gte: req.query.de ? new Date(req.query.de) : undefined, lte: req.query.ate ? new Date(req.query.ate) : undefined } : undefined,
@@ -231,6 +238,7 @@ router.post("/cotacoes/:id/enviar", async (req, res) => {
     const c = await prisma.cotacaoEnvio.findUnique({ where: { id }, include: { obra: true, itens: { include: { produto: true, aplicacao: true } }, fornecedores: { include: { fornecedor: true } } } });
     if (!c || !c.fornecedores.length) throw new Error("Cotação não encontrada ou sem fornecedores.");
     assertObraAccess(req.usuario, c.obraId);
+    assertCotacaoNaoConcluida(c);
     if (!["RASCUNHO", "ENVIADA", "EM_ANDAMENTO"].includes(c.status)) throw new Error("Esta cotação não pode ser enviada no estado atual.");
     const resultados = await Promise.all(c.fornecedores.map(async p => {
       const aplicacoes = [...new Set(c.itens.map(item => item.aplicacao?.nome).filter(Boolean))];
@@ -275,7 +283,6 @@ router.post("/cotacoes/:id/enviar", async (req, res) => {
         await registrarAuditoria(tx, { usuarioId: req.usuario.id, operacao: "ENVIAR", entidadeTipo: "CotacaoEnvio", entidadeId: id, valoresAntes: { status: c.status }, valoresNovos: { status }, detalhes: { resultados }, cotacaoEnvioId: id });
       });
     }
-    if (resultados.some(item => item.status === "ENVIADO")) await notificarUsuario({ usuarioId: c.usuarioId, evento: "COTACAO_ENVIADA", entidadeTipo: "CotacaoEnvio", entidadeId: id, chaveIdempotencia: `cotacao-enviada:${id}`, mensagem: `A cotacao #${id} foi enviada aos fornecedores da obra ${c.obra.nome}.` }).catch(() => {});
     res.json(resultados);
   } catch (e) { fail(res, e); }
 });
@@ -298,6 +305,7 @@ router.post("/respostas", async (req, res) => {
     if (!await prisma.cotacaoEnvioFornecedor.findUnique({ where: { cotacaoEnvioId_fornecedorId: { cotacaoEnvioId: Number(cotacaoEnvioId), fornecedorId: Number(fornecedorId) } } })) throw new Error("O fornecedor não foi selecionado para esta cotação.");
     const quote = await prisma.cotacaoEnvio.findUniqueOrThrow({ where: { id: Number(cotacaoEnvioId) } });
     assertObraAccess(req.usuario, quote.obraId);
+    assertCotacaoNaoConcluida(quote);
     const resposta = await prisma.$transaction(async tx => {
       const row = await tx.cotacaoResposta.create({ data: { cotacaoEnvioId: Number(cotacaoEnvioId), fornecedorId: Number(fornecedorId), usuarioPreenchimentoId: req.usuario.id, observacao, frete, condicaoPagamento: req.body.condicaoPagamento || null, itens: { create: ofertas } }, include: { itens: true, fornecedor: true } });
       await registrarAuditoria(tx, { usuarioId: req.usuario.id, operacao: "CRIAR", entidadeTipo: "CotacaoResposta", entidadeId: row.id, valoresNovos: row, cotacaoEnvioId: Number(cotacaoEnvioId) });
@@ -312,6 +320,7 @@ router.patch("/respostas/:id", async (req, res) => {
     const id = Number(req.params.id);
     const current = await prisma.cotacaoResposta.findUniqueOrThrow({ where: { id }, include: { itens: { include: { selecoes: true } }, cotacao: true } });
     assertObraAccess(req.usuario, current.cotacao.obraId);
+    assertCotacaoNaoConcluida(current.cotacao);
     if (!["PREENCHIMENTO", "ENCAMINHADA"].includes(current.status)) throw new Error("Esta resposta não pode ser alterada no estado atual.");
     if (current.itens.some(item => item.selecoes.some(selection => selection.status === "APROVADA"))) throw new Error("A resposta contém ofertas vinculadas a compra aprovada e não pode ser alterada.");
     const frete = req.body.frete === undefined ? current.frete : req.body.frete === "" || req.body.frete == null ? null : Number(req.body.frete);
@@ -331,6 +340,7 @@ router.post("/respostas/:id/itens", async (req, res) => {
     const resposta = await prisma.cotacaoResposta.findUniqueOrThrow({ where: { id: respostaId } });
     const quote = await prisma.cotacaoEnvio.findUniqueOrThrow({ where: { id: resposta.cotacaoEnvioId } });
     assertObraAccess(req.usuario, quote.obraId);
+    assertCotacaoNaoConcluida(quote);
     if (resposta.status !== "PREENCHIMENTO") throw new Error("Somente rascunhos podem receber novos itens.");
     const quantidade = Number(data.quantidadeOfertada ?? 0), valor = Number(data.valorUnitario ?? 0);
     if (!Number.isFinite(quantidade) || !Number.isFinite(valor) || quantidade < 0 || valor < 0 || (data.indisponivel && (quantidade !== 0 || valor !== 0)) || (!data.indisponivel && quantidade === 0)) throw new Error("Informe quantidade e valor válidos; indisponíveis devem usar zero.");
@@ -352,6 +362,7 @@ router.patch("/respostas/:respostaId/itens/:itemId", async (req, res) => {
     const item = await prisma.cotacaoRespostaItem.findUniqueOrThrow({ where: { id: itemId } });
     const quote = await prisma.cotacaoEnvio.findUniqueOrThrow({ where: { id: resposta.cotacaoEnvioId } });
     assertObraAccess(req.usuario, quote.obraId);
+    assertCotacaoNaoConcluida(quote);
     if (!["PREENCHIMENTO", "ENCAMINHADA"].includes(resposta.status) || item.cotacaoRespostaId !== respostaId) throw new Error("Item não editável ou não pertence à resposta.");
     if (await prisma.selecaoCompraItem.count({ where: { cotacaoRespostaItemId: itemId, status: "APROVADA" } })) throw new Error("Oferta vinculada a compra aprovada não pode ser alterada.");
     const quantidade = Number(req.body.quantidadeOfertada ?? item.quantidadeOfertada), valor = Number(req.body.valorUnitario ?? item.valorUnitario);
@@ -372,6 +383,7 @@ router.delete("/respostas/:respostaId/itens/:itemId", async (req, res) => {
     const item = await prisma.cotacaoRespostaItem.findUniqueOrThrow({ where: { id: itemId } });
     const quote = await prisma.cotacaoEnvio.findUniqueOrThrow({ where: { id: resposta.cotacaoEnvioId } });
     assertObraAccess(req.usuario, quote.obraId);
+    assertCotacaoNaoConcluida(quote);
     if (!["PREENCHIMENTO", "ENCAMINHADA"].includes(resposta.status) || item.cotacaoRespostaId !== respostaId) throw new Error("Item não removível ou não pertence à resposta.");
     if (await prisma.selecaoCompraItem.count({ where: { cotacaoRespostaItemId: itemId, status: "APROVADA" } })) throw new Error("Oferta vinculada a compra aprovada não pode ser removida.");
     await prisma.$transaction(async tx => {
@@ -386,6 +398,7 @@ router.post("/respostas/:id/encaminhar", async (req, res) => {
     const respostaId = Number(req.params.id);
     const current = await prisma.cotacaoResposta.findUniqueOrThrow({ where: { id: respostaId }, include: { fornecedor: true, cotacao: { include: { obra: true } }, itens: { include: { produto: true } } } });
     assertObraAccess(req.usuario, current.cotacao.obraId);
+    assertCotacaoNaoConcluida(current.cotacao);
     if (current.status !== "PREENCHIMENTO") throw new Error("Esta resposta já foi encaminhada.");
     const ids = [...new Set((req.body.destinatarioIds || []).map(Number))];
     if (!ids.length || ids.some(id => !Number.isInteger(id))) throw new Error("Selecione ao menos um destinatário para enviar a resposta.");
@@ -436,13 +449,82 @@ router.post("/respostas/:id/encaminhar", async (req, res) => {
   } catch (e) { fail(res, e); }
 });
 
+router.post("/cotacoes/:id/encaminhar-respostas", async (req, res) => {
+  try {
+    const id = Number(req.params.id);
+    const cotacao = await prisma.cotacaoEnvio.findUniqueOrThrow({ where: { id }, include: { obra: true, respostas: { include: { fornecedor: true, itens: { include: { produto: true, itemSolicitado: { include: { aplicacao: true } } } } } } } });
+    assertObraAccess(req.usuario, cotacao.obraId);
+    assertCotacaoNaoConcluida(cotacao);
+    const respostas = cotacao.respostas.filter(resposta => resposta.itens.length);
+    if (!respostas.length) throw new Error("A cotação ainda não possui respostas para encaminhar.");
+    const destinatarioIds = [...new Set((req.body.destinatarioIds || []).map(Number))];
+    if (!destinatarioIds.length || destinatarioIds.some(destinatarioId => !Number.isInteger(destinatarioId))) throw new Error("Selecione ao menos um destinatário.");
+    const destinatarios = await prisma.whatsAppDestinatario.findMany({ where: { id: { in: destinatarioIds }, usuarioId: req.usuario.id, ativo: true }, orderBy: { nome: "asc" } });
+    if (destinatarios.length !== destinatarioIds.length) throw new Error("Um ou mais destinatários não existem, estão inativos ou não pertencem a este usuário.");
+
+    const brl = new Intl.NumberFormat("pt-BR", { style: "currency", currency: "BRL" });
+    const totais = respostas.map(resposta => {
+      const produtosTotal = resposta.itens.reduce((total, item) => total + (item.indisponivel ? 0 : Number(item.quantidadeOfertada) * Number(item.valorUnitario)), 0);
+      const frete = Number(resposta.frete || 0);
+      return { resposta, produtosTotal, frete, total: produtosTotal + frete };
+    });
+    const linhas = [
+      `Comparativo de respostas · Cotação #${String(id).padStart(4, "0")}`,
+      `Obra: ${cotacao.obra.nome}`,
+      "",
+      ...totais.flatMap(({ resposta, produtosTotal, frete, total }) => {
+        const aplicacoes = [...new Set(resposta.itens.map(item => item.itemSolicitado?.aplicacao?.nome).filter(Boolean))];
+        return [
+        `FORNECEDOR: ${resposta.fornecedor.nome}`,
+        `Aplicação: ${aplicacoes.length ? aplicacoes.join(", ") : "Sem aplicação"}`,
+        ...resposta.itens.map(item => {
+          return item.indisponivel
+            ? `• ${item.produto.nome}: indisponível`
+            : `• ${item.produto.nome}: ${Number(item.quantidadeOfertada)} ${item.produto.unidade} × ${brl.format(Number(item.valorUnitario))} = ${brl.format(Number(item.quantidadeOfertada) * Number(item.valorUnitario))}`;
+        }),
+        `Produtos: ${brl.format(produtosTotal)} · Frete: ${brl.format(frete)} · Total: ${brl.format(total)}`,
+        "",
+        ];
+      }),
+      `Menor total: ${brl.format(Math.min(...totais.map(item => item.total)))} · ${totais.filter(item => item.total === Math.min(...totais.map(entry => entry.total))).map(item => item.resposta.fornecedor.nome).join(", ")}`,
+      `Maior total: ${brl.format(Math.max(...totais.map(item => item.total)))} · ${totais.filter(item => item.total === Math.max(...totais.map(entry => entry.total))).map(item => item.resposta.fornecedor.nome).join(", ")}`,
+    ];
+    const mensagem = linhas.join("\n");
+    const envios = await Promise.all(destinatarios.map(async destinatario => {
+      try {
+        const { identificadorExterno } = await whatsapp.enviar({ telefone: destinatario.identificador, mensagem, usuarioId: req.usuario.id });
+        return { destinatario, identificadorExterno, status: "ENVIADO", erro: null };
+      } catch (error) { return { destinatario, status: "FALHOU", erro: error.message, identificadorExterno: null }; }
+    }));
+    const enviados = envios.filter(item => item.status === "ENVIADO");
+    await prisma.$transaction(async tx => {
+      await tx.historicoEnvioResposta.createMany({ data: respostas.flatMap(resposta => envios.map(envio => ({ cotacaoRespostaId: resposta.id, usuarioId: req.usuario.id, destinatarioId: envio.destinatario.id, destinatarioNome: envio.destinatario.nome, telefone: envio.destinatario.identificador, mensagem, status: envio.status, erro: envio.erro, identificadorExterno: envio.identificadorExterno }))) });
+      if (!enviados.length) return;
+      await tx.cotacaoResposta.updateMany({ where: { id: { in: respostas.map(resposta => resposta.id) }, status: "PREENCHIMENTO" }, data: { status: "ENCAMINHADA", dataResposta: new Date() } });
+      const atual = await tx.cotacaoEnvio.findUniqueOrThrow({ where: { id } });
+      let statusCotacao = atual.status;
+      const proximosStatus = statusCotacao === "RASCUNHO" ? ["ENVIADA", "EM_ANDAMENTO"] : statusCotacao === "ENVIADA" ? ["EM_ANDAMENTO"] : [];
+      for (const proximoStatus of proximosStatus) {
+        const novoStatus = validarTransicaoCotacao(statusCotacao, proximoStatus);
+        await tx.cotacaoEnvio.update({ where: { id }, data: { status: novoStatus } });
+        await tx.historicoStatus.create({ data: { entidadeTipo: "CotacaoEnvio", entidadeId: id, statusAnterior: statusCotacao, statusNovo: novoStatus, usuarioId: req.usuario.id, cotacaoEnvioId: id } });
+        statusCotacao = novoStatus;
+      }
+      await registrarAuditoria(tx, { usuarioId: req.usuario.id, operacao: "ENCAMINHAR_RESPOSTAS", entidadeTipo: "CotacaoEnvio", entidadeId: id, valoresNovos: { respostas: respostas.map(resposta => resposta.id), destinatarios: envios.map(item => ({ id: item.destinatario.id, status: item.status, erro: item.erro })) }, cotacaoEnvioId: id });
+    });
+    if (!enviados.length) return res.status(502).json({ erro: `Não foi possível enviar o comparativo por WhatsApp: ${envios.map(item => `${item.destinatario.nome}: ${item.erro}`).join("; ")}` });
+    res.json({ whatsapp: { enviados: enviados.map(item => item.destinatario.nome), falhas: envios.filter(item => item.status === "FALHOU").map(item => ({ nome: item.destinatario.nome, erro: item.erro })) } });
+  } catch (e) { fail(res, e); }
+});
+
 router.patch("/compras/ofertas/:id/quantidade-ofertada", permitir("ADMINISTRADOR", "ADMINISTRADOR_SISTEMA"), async (req, res) => {
   try {
     const id = Number(req.params.id);
     const quantidadeOfertada = Number(req.body.quantidadeOfertada);
     if (!Number.isFinite(quantidadeOfertada) || quantidadeOfertada <= 0) throw new Error("A quantidade ofertada deve ser maior que zero.");
 
-    const oferta = await prisma.cotacaoRespostaItem.findUniqueOrThrow({ where: { id }, include: { resposta: true } });
+    const oferta = await prisma.cotacaoRespostaItem.findUniqueOrThrow({ where: { id }, include: { resposta: { include: { cotacao: true } } } });
+    assertCotacaoNaoConcluida(oferta.resposta.cotacao);
     if (oferta.resposta.status !== "ENCAMINHADA" || oferta.status !== "PENDENTE" || oferta.indisponivel) {
       throw new Error("Somente ofertas encaminhadas e ainda sem decisão podem ser editadas.");
     }
@@ -489,8 +571,10 @@ router.post("/compras/aprovar", permitir("ADMINISTRADOR", "ADMINISTRADOR_SISTEMA
       }
       const selecoesAprovadas = await tx.selecaoCompraItem.count({ where: { compraId: c.id, status: "APROVADA" } });
       if (selecoesAprovadas > 0) {
-        const aprovacoes = await tx.selecaoCompraItem.findMany({ where: { compraId: c.id, status: "APROVADA" } });
-        const totalAprovado = aprovacoes.reduce((sum, row) => sum + Number(row.quantidadeAprovada) * Number(row.valorUnitarioAprovado), 0);
+        const aprovacoes = await tx.selecaoCompraItem.findMany({ where: { compraId: c.id, status: "APROVADA" }, include: { oferta: { include: { resposta: true } } } });
+        const fornecedoresAprovados = new Map(aprovacoes.map(row => [row.oferta.resposta.fornecedorId, row.oferta.resposta]));
+        const freteAprovado = [...fornecedoresAprovados.values()].reduce((sum, resposta) => sum + Number(resposta.frete || 0), 0);
+        const totalAprovado = aprovacoes.reduce((sum, row) => sum + Number(row.quantidadeAprovada) * Number(row.valorUnitarioAprovado), 0) + freteAprovado;
         await tx.compra.update({ where: { id: c.id }, data: { aprovadorId: req.usuario.id, aprovadaEm: new Date(), valorAprovado: totalAprovado } });
         const novoStatus = validarTransicaoCotacao(cotacao.status, "CONCLUIDA", { compraAprovada: true });
         await tx.cotacaoEnvio.update({ where: { id: cotacao.id }, data: { status: novoStatus } });
@@ -658,6 +742,34 @@ router.get("/compras/:id/notas-fiscais/historico", async (req, res) => {
     res.json(await prisma.historicoNotaFiscal.findMany({ where: { compraId: compra.id }, include: { usuario: { select: { id: true, nome: true } } }, orderBy: { substituidaEm: "desc" } }));
   } catch (e) { fail(res, e); }
 });
+
+router.patch("/pedidos/:id/previsao-entrega", async (req, res) => {
+  try {
+    const pedidoId = Number(req.params.id);
+    const dataPrevistaEntrega = req.body.dataPrevistaEntrega ? new Date(req.body.dataPrevistaEntrega) : null;
+    if (dataPrevistaEntrega && Number.isNaN(dataPrevistaEntrega.getTime())) throw new Error("Data prevista de entrega inválida.");
+    const result = await prisma.$transaction(async tx => {
+      const pedido = await tx.pedidoCompra.findUniqueOrThrow({ where: { id: pedidoId }, include: { compra: true, itens: { include: { recebimentos: true } } } });
+      assertObraAccess(req.usuario, pedido.compra.obraId);
+      if (pedido.status === "CANCELADO") throw new Error("Não é possível prever a entrega de um pedido cancelado.");
+      const fornecedores = await tx.pedidoCompra.findMany({ where: { compraId: pedido.compraId, status: { not: "CANCELADO" } }, select: { fornecedorId: true } });
+      if (new Set(fornecedores.map(item => item.fornecedorId)).size < 2) throw new Error("A previsão separada só está disponível quando a compra tem mais de um fornecedor.");
+      const itens = pedido.itens.filter(item => !["ENTREGUE", "CANCELADA"].includes(item.statusEntrega));
+      if (!itens.length) throw new Error("Não há produtos pendentes de entrega nesta compra.");
+      const updated = [];
+      for (const item of itens) {
+        const quantidadeRecebida = item.recebimentos.reduce((sum, recebimento) => sum + Number(recebimento.quantidadeRecebida), 0);
+        const statusEntrega = calcularStatusEntrega({ quantidade: item.quantidade, recebida: quantidadeRecebida, dataPrevista: dataPrevistaEntrega });
+        const row = await tx.pedidoCompraItem.update({ where: { id: item.id }, data: { dataPrevistaEntrega, statusEntrega, observacaoEntrega: req.body.observacoes ?? item.observacaoEntrega } });
+        await registrarAuditoria(tx, { usuarioId: req.usuario.id, operacao: "ATUALIZAR_PREVISAO_ENTREGA_FORNECEDOR", entidadeTipo: "PedidoCompraItem", entidadeId: item.id, valoresAntes: { dataPrevistaEntrega: item.dataPrevistaEntrega, statusEntrega: item.statusEntrega, observacaoEntrega: item.observacaoEntrega }, valoresNovos: row, compraId: pedido.compraId, pedidoCompraId: pedido.id });
+        updated.push(row);
+      }
+      return updated;
+    });
+    res.json({ itensAtualizados: result.length, dataPrevistaEntrega });
+  } catch (e) { fail(res, e); }
+});
+
 router.post("/pedidos/itens/:id/recebimentos", async (req, res) => {
   try {
     const itemId = Number(req.params.id), quantidadeRecebida = Number(req.body.quantidadeRecebida);
@@ -728,25 +840,6 @@ router.post("/pedidos/:id/recebimentos", async (req, res) => {
       return { pedido: pedidoAtualizado, recebimentos: registros };
     });
     res.status(201).json(result);
-  } catch (e) { fail(res, e); }
-});
-
-router.patch("/pedidos/itens/:id/entrega", async (req, res) => {
-  try {
-    const id = Number(req.params.id);
-    const row = await prisma.$transaction(async tx => {
-      const item = await tx.pedidoCompraItem.findUniqueOrThrow({ where: { id }, include: { pedido: { include: { compra: true }, } , recebimentos: true } });
-      assertObraAccess(req.usuario, item.pedido.compra.obraId);
-      if (["ENTREGUE", "CANCELADA"].includes(item.statusEntrega)) throw new Error("A entrega deste item já foi encerrada.");
-      const dataPrevistaEntrega = req.body.dataPrevistaEntrega ? new Date(req.body.dataPrevistaEntrega) : null;
-      if (dataPrevistaEntrega && Number.isNaN(dataPrevistaEntrega.getTime())) throw new Error("Data prevista de entrega inválida.");
-      const quantidadeRecebida = item.recebimentos.reduce((sum, receipt) => sum + Number(receipt.quantidadeRecebida), 0);
-      const statusEntrega = calcularStatusEntrega({ quantidade: item.quantidade, recebida: quantidadeRecebida, dataPrevista: dataPrevistaEntrega, cancelada: req.body.status === "CANCELADA" });
-      const updated = await tx.pedidoCompraItem.update({ where: { id }, data: { dataPrevistaEntrega, statusEntrega, observacaoEntrega: req.body.observacoes ?? item.observacaoEntrega } });
-      await registrarAuditoria(tx, { usuarioId: req.usuario.id, operacao: "ATUALIZAR_ENTREGA", entidadeTipo: "PedidoCompraItem", entidadeId: id, valoresAntes: { dataPrevistaEntrega: item.dataPrevistaEntrega, statusEntrega: item.statusEntrega, observacaoEntrega: item.observacaoEntrega }, valoresNovos: updated, compraId: item.pedido.compraId, pedidoCompraId: item.pedidoCompraId });
-      return updated;
-    });
-    res.json(row);
   } catch (e) { fail(res, e); }
 });
 

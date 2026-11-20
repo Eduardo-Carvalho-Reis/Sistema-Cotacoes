@@ -8,6 +8,8 @@
 .approval-total,.approval-supplier-total{display:flex;flex-direction:column;gap:4px;color:#31435D}
 .approval-total{margin-left:auto;padding-left:13px;border-left:1px solid #e8ece7}
 .toolbar .result-count{margin-left:0}
+.approval-quote-select{width:280px;flex:0 0 280px;position:relative;z-index:5}
+.approval-quote-select .searchable-select-options{position:absolute;top:38px;left:0;right:0;max-height:220px;box-shadow:0 8px 22px #1824351a}
 .approval-total small,.approval-supplier-total small{color:#929c93;font-size:8px}
 .approval-total b,.approval-supplier-total b{font-size:12px;white-space:nowrap}
 .approval-supplier-total{align-items:flex-end;margin-left:auto}

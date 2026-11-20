@@ -39,7 +39,7 @@
 
 .receive-items{margin:4px 0 14px;border:1px solid #e9ede8;border-radius:7px;overflow:hidden}.receive-items-head,.receive-item-row{display:grid;grid-template-columns:minmax(0,1fr) 140px;align-items:center;gap:12px;padding:9px 11px}.receive-items-head{background:#f7f9f6;color:#89948a;font-size:8px;font-weight:700;letter-spacing:.5px}.receive-item-row{border-top:1px solid #eef1ed}.receive-item-row>span{min-width:0}.receive-item-row b,.receive-item-row small{display:block}.receive-item-row b{font-size:10px;color:#454b52}.receive-item-row small{margin-top:4px;color:#89948a;font-size:8px}.receive-item-row input{width:100%;min-width:0;min-height:36px;padding:7px 9px;border:1px solid #e5eae5;border-radius:6px;font-size:10px}@media(max-width:480px){.receive-items-head,.receive-item-row{grid-template-columns:minmax(0,1fr) 95px;gap:7px;padding:8px}.receive-items-head{font-size:7px}.receive-item-row small{font-size:7px}}
 
-.purchase-invoice-details{display:block;margin-top:4px;color:#62748a;font-size:8px;line-height:1.4}
+.purchase-invoice-details{display:block;margin-top:6px;color:#455b70;font-size:10px;font-weight:600;line-height:1.5}
 
 .invoice-pending-badge{display:inline-flex;align-items:center;white-space:nowrap;padding:4px 7px;border:1px solid #f1ddb5;border-radius:6px;background:#fff8e9;color:#a96c12;font-size:8px;font-weight:600}
 
@@ -48,3 +48,5 @@
 .purchase-filter-select{width:205px;flex:0 0 205px;position:relative;z-index:5}.purchase-filter-select .searchable-select-input{height:36px}.purchase-filter-select .searchable-select-options{position:absolute;top:38px;left:0;right:0;max-height:190px;box-shadow:0 8px 22px #1824351a}.purchase-filter-select .searchable-select-count{position:absolute;top:39px;right:7px;background:#fff;padding:2px 4px}.purchase-filter-select:has(.searchable-select-count){margin-bottom:18px}@media(max-width:780px){.purchase-filter-select{flex:1 1 205px;width:auto}}
 
 .purchase-cancelled-details{display:flex;align-items:flex-start;gap:7px;margin:8px 0;padding:9px 10px;border:1px solid #efcbc7;border-radius:6px;background:#fff6f5;color:#84534f;font-size:9px;line-height:1.5}.purchase-cancelled-details b{flex:0 0 auto;font-size:9px}.purchase-cancel-action{color:#a96c12}.purchase-delete-action{color:#b44d42}.purchase-delete-action:hover{background:#fff0ee;color:#a33d33}
+
+.whatsapp-history-actions{display:flex;justify-content:center;padding:12px 18px 16px}

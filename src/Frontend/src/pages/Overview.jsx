@@ -11,7 +11,7 @@ import { money, date, statusNames } from '../utils/formatters.js';
 import { PageTitle, Button, Badge, Empty, Stat } from '../components/index.js';
 
 function Overview({ data, go, setModal }) {
-  const openQuotes = data.quotes.filter(q => !['ENCERRADA', 'CANCELADA'].includes(q.status)).length;
+  const openQuotes = data.quotes.filter(q => !['CONCLUIDA', 'ENCERRADA', 'CANCELADA'].includes(q.status)).length;
   const pending = data.purchases.flatMap(p => p.pedidos || []).filter(p => ['AGUARDANDO_CONFIRMACAO', 'PARCIALMENTE_RECEBIDO'].includes(p.status)).length;
   const steps = [
     { n: '01', title: 'Criar cotação', desc: 'Defina a obra, os itens e os fornecedores.', id: 'quotes', done: data.quotes.length > 0, icon: ClipboardList },

@@ -14,7 +14,10 @@ router.get("/sessao", async (req, res) => {
 });
 
 router.post("/sessao/conectar", async (req, res) => {
-  try { res.json(await wppConnectSessions.connect(req.usuario.id, { restart: true })); }
+  // WPPConnect may already be starting this session during server boot. Do not
+  // close its Chromium client just to request the QR; that teardown + relaunch
+  // adds a full browser startup to every first connection attempt.
+  try { res.json(await wppConnectSessions.connect(req.usuario.id)); }
   catch (error) { sessionError(res, error); }
 });
 

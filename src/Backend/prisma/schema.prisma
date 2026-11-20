@@ -389,10 +389,8 @@ model NotaFiscal {
   pedidoCompraId    Int
   compraId          Int
   numero            String
-  chaveAcesso       String?
   dataEmissao       DateTime
   valorTotal        Decimal      @db.Decimal(12, 2)
-  arquivoReferencia String?
   dataRegistro      DateTime     @default(now())
   ativa             Boolean      @default(true)
   status            String       @default("REGISTRADA")
@@ -410,10 +408,8 @@ model HistoricoNotaFiscal {
   compraId Int
   usuarioId Int?
   numero String
-  chaveAcesso String?
   dataEmissao DateTime
   valorTotal Decimal @db.Decimal(12, 2)
-  arquivoReferencia String?
   dataRegistro DateTime
   substituidaEm DateTime @default(now())
   notaFiscal NotaFiscal @relation(fields: [notaFiscalId], references: [id], onDelete: Restrict)

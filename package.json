@@ -11,7 +11,8 @@
     "start": "tsx src/Backend/server.js",
     "db:generate": "prisma generate --schema src/Backend/prisma/schema.prisma",
     "db:migrate": "prisma migrate deploy --config src/Backend/prisma.config.ts",
-    "db:status": "prisma migrate status --config src/Backend/prisma.config.ts"
+    "db:status": "prisma migrate status --config src/Backend/prisma.config.ts",
+    "db:seed": "tsx src/Backend/prisma/seed.js"
   },
   "repository": {
     "type": "git",

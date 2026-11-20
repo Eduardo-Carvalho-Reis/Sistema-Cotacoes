@@ -9,12 +9,14 @@ import {
 
 import { money, date, statusNames } from '../utils/formatters.js';
 import { PageTitle, Button, Empty } from '../components/index.js';
+import { SearchableSelect } from './Quotes.jsx';
 import './Approvals.css';
 
 function Approvals({ data, api, refresh, notify, go, user }) {
   const [quoteId, setQuoteId] = useState(''); const [decisions, setDecisions] = useState({}); const [busy, setBusy] = useState(false);
   const [offerQuantityEdits, setOfferQuantityEdits] = useState({}); const [savingOfferId, setSavingOfferId] = useState(null);
-  const quote = data.quotes.find(q => q.id === Number(quoteId));
+  const quote = data.quotes.find(q => q.id === Number(quoteId) && q.status !== 'CONCLUIDA');
+  const availableQuotes = useMemo(() => data.quotes.filter(item => item.status !== 'CONCLUIDA' && item.respostas?.some(response => response.status === 'ENCAMINHADA')), [data.quotes]);
   const offers = quote?.respostas?.filter(r => r.status === 'ENCAMINHADA').flatMap(r => r.itens.filter(item => item.status === 'PENDENTE').map(item => ({ ...item, supplier: r.fornecedor, requested: quote.itens?.find(i => i.id === item.cotacaoEnvioItemId) }))) || [];
   const supplierGroups = offers.reduce((groups, offer) => {
     const id = String(offer.supplier?.id ?? 'sem-fornecedor');
@@ -30,7 +32,9 @@ function Approvals({ data, api, refresh, notify, go, user }) {
     return quantity * unitPrice;
   };
   const approvedTotal = rows => rows.reduce((total, offer) => total + (productApprovedTotal(offer) || 0), 0);
-  const totalApproved = approvedTotal(offers);
+  const approvedSupplierIds = new Set(offers.filter(offer => decisions[offer.id]?.status === 'APROVADA').map(offer => offer.supplier?.id));
+  const approvedFreight = (quote?.respostas || []).filter(response => approvedSupplierIds.has(response.fornecedorId)).reduce((sum, response) => sum + Number(response.frete || 0), 0);
+  const totalApproved = approvedTotal(offers) + approvedFreight;
   const decide = (id, field, value) => setDecisions(v => ({ ...v, [id]: { ...v[id], [field]: value } }));
   const previouslyApprovedQuantity = itemId => data.purchases
     .filter(purchase => purchase.cotacaoEnvioId === quote?.id)
@@ -125,7 +129,7 @@ function Approvals({ data, api, refresh, notify, go, user }) {
   };
   return <>
     <PageTitle eyebrow="ANÁLISE ADMINISTRATIVA" title="Aprovações" description="Compare as propostas recebidas e defina quais itens serão comprados." />
-    <div className="toolbar"><div className="select-wrap"><ClipboardList size={15}/><select value={quoteId} onChange={event => setQuoteId(event.target.value)}><option value="">Selecione uma cotação</option>{data.quotes.filter(item => item.respostas?.some(response => response.status === 'ENCAMINHADA')).map(item => <option key={item.id} value={item.id}>#{String(item.id).padStart(4, '0')} · {item.obra?.nome || 'Obra'}</option>)}</select></div><span className="result-count">{offers.length} ofertas para análise</span><div className="approval-total"><small>Valor total</small><b>{money(totalApproved)}</b></div></div>
+    <div className="toolbar"><SearchableSelect className="approval-quote-select" options={availableQuotes} value={quote ? quoteId : ''} onChange={setQuoteId} placeholder="Selecione uma cotação" getLabel={item => 'Cotação #' + String(item.id).padStart(4, '0') + ' - ' + (item.obra?.nome || 'Obra')}/><span className="result-count">{offers.length} ofertas para análise</span><div className="approval-total"><small>Valor total</small><b>{money(totalApproved)}</b></div></div>
     {offers.length > 0 ? <div className="approval-supplier-groups">
       {[...supplierGroups.entries()].map(([supplierId, supplierOffers]) => {
         const supplier = supplierOffers[0].supplier;

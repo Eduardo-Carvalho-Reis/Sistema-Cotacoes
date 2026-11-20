@@ -19,6 +19,7 @@ function App() {
   const [notice, setNotice] = useState('');
   const [loading, setLoading] = useState(false);
   const [modal, setModal] = useState(null);
+  const [responseQuoteId, setResponseQuoteId] = useState(null);
   const [mobileNav, setMobileNav] = useState(false);
 
   const api = useCallback(async (url, options = {}) => {
@@ -64,15 +65,15 @@ function App() {
   const go = (id) => { setPage(id); setMobileNav(false); setModal(null); };
   const perform = async (fn, success) => { try { await fn(); notify(success); setModal(null); await refresh(); } catch (e) { notify(e.message); } };
 
-  const bootstrap = async (nome, email, senha) => { try { await api('/auth/bootstrap', { method: 'POST', body: JSON.stringify({ nome, email, senha }) }); return true; } catch (e) { return e.message; } };
-  if (!token || !user) return <Login onLogin={signIn} onBootstrap={bootstrap} />;
+  if (!token || !user) return <Login onLogin={signIn} />;
   const nav = [
-    { title: 'WORKSPACE', items: [{ id: 'overview', label: 'Visão geral', icon: LayoutDashboard }, { id: 'quotes', label: 'Cotações', icon: ClipboardList, count: data.quotes.filter(q => !['ENCERRADA', 'CANCELADA'].includes(q.status)).length }, { id: 'responses', label: 'Respostas', icon: MessageCircle }, { id: 'approval', label: 'Aprovações', icon: BadgeCheck }, { id: 'purchases', label: 'Pedidos e compras', icon: ShoppingCart }] },
+    { title: 'WORKSPACE', items: [{ id: 'overview', label: 'Visão geral', icon: LayoutDashboard }, { id: 'quotes', label: 'Cotações', icon: ClipboardList, count: data.quotes.filter(q => !['CONCLUIDA', 'ENCERRADA', 'CANCELADA'].includes(q.status)).length }, { id: 'responses', label: 'Respostas', icon: MessageCircle }, { id: 'approval', label: 'Aprovações', icon: BadgeCheck }, { id: 'purchases', label: 'Pedidos e compras', icon: ShoppingCart }] },
   ];
   const settingsPages = { settings: 'Configurações', catalog: 'Cadastros', whatsapp: 'WhatsApp', reports: 'Relatórios', users: 'Usuários' };
   const activeLabel = nav.flatMap(n => n.items).find(i => i.id === page)?.label || settingsPages[page] || 'Visão geral';
   const settingsActive = Object.hasOwn(settingsPages, page);
-  const contentProps = { api, data, refresh, go, notify, perform, setModal };
+  const contentProps = { api, data, refresh, go, notify, perform, setModal, responseQuoteId, setResponseQuoteId };
+  const openResponseQuote = (quote) => { setResponseQuoteId(quote.id); setPage('responses'); setMobileNav(false); setModal(null); };
 
   return <div className="app-shell">
     <aside className={`sidebar ${mobileNav ? 'sidebar-open' : ''}`}><button className="icon-button mobile-close sidebar-mobile-close" onClick={() => setMobileNav(false)} aria-label="Fechar menu"><X size={18}/></button>
@@ -83,7 +84,7 @@ function App() {
       <header className="topbar"><div className="topbar-left"><button className="icon-button mobile-menu" onClick={() => setMobileNav(true)}><Menu size={19}/></button><div className="breadcrumbs"><span>Workspace</span><ChevronRight size={14}/><b>{activeLabel}</b></div></div><div className="topbar-right"><div className="search-shortcut"><Search size={15}/><span>Buscar</span><kbd>⌘ K</kbd></div><button className="icon-button notification" onClick={() => notify('Você está em dia. Nenhuma notificação nova.')}><Bell size={18}/><i></i></button><div className="topbar-divider"></div><div className="top-user"><div className="avatar small-avatar">{user.nome?.slice(0, 1).toUpperCase()}</div><ChevronDown size={14}/></div></div></header>
       <div className="page-wrap">
         {page === 'overview' && <Overview {...contentProps} user={user} />}
-        {page === 'quotes' && <Quotes {...contentProps} />}
+        {page === 'quotes' && <Quotes {...contentProps} openResponseQuote={openResponseQuote} />}
         {page === 'responses' && <Responses {...contentProps} />}
         {page === 'approval' && <Approvals {...contentProps} user={user} />}
         {page === 'purchases' && <Purchases {...contentProps} user={user} />}
@@ -99,7 +100,7 @@ function App() {
     {notice && <div className="toast"><CheckCircle2 size={17}/>{notice}</div>}
     {modal?.type === 'newQuote' && <QuoteWizard {...contentProps} onClose={() => setModal(null)} />}
     {['editQuote', 'cancelQuote'].includes(modal?.type) && <QuoteManagementModal {...contentProps} quote={modal.quote} mode={modal.type === 'cancelQuote' ? 'cancel' : 'edit'} onClose={() => setModal(null)} />}
-    {modal?.type === 'respond' && <ResponseModal {...contentProps} quote={modal.quote} onClose={() => setModal(null)} />}
+    {modal?.type === 'respond' && <ResponseModal {...contentProps} quote={modal.quote} supplierId={modal.supplierId} onClose={() => setModal(null)} />}
     {modal?.type === 'purchaseAction' && <PurchaseModal {...contentProps} purchase={modal.purchase} order={modal.order} action={modal.action} onClose={() => setModal(null)} />}
   </div>;
 }

@@ -6,16 +6,6 @@ import { autenticar } from "../middleware/auth.js";
 import { registrarAuditoria } from "../Services/audit.service.js";
 
 const router = Router();
-router.post("/bootstrap", async (req, res) => {
-  try {
-    if (await prisma.usuario.count()) return res.status(409).json({ erro: "O administrador inicial já foi criado." });
-    const { nome, email, senha } = req.body;
-    if (!nome || !email || !senha || senha.length < 10) return res.status(400).json({ erro: "Informe nome, e-mail e senha com ao menos 10 caracteres." });
-    const perfil = await prisma.perfil.upsert({ where: { nome: "ADMINISTRADOR_SISTEMA" }, update: {}, create: { nome: "ADMINISTRADOR_SISTEMA", descricao: "Administração do sistema" } });
-    const usuario = await prisma.usuario.create({ data: { nome, email, senhaHash: await bcrypt.hash(senha, 12), perfilId: perfil.id } });
-    return res.status(201).json({ id: usuario.id, nome: usuario.nome, email: usuario.email });
-  } catch (e) { return res.status(400).json({ erro: e.message }); }
-});
 router.post("/login", async (req, res) => {
   try {
     const usuario = await prisma.usuario.findUnique({ where: { email: req.body.email }, include: { perfil: true } });
