@@ -7,7 +7,7 @@ import { registrarAuditoria } from "../Services/audit.service.js";
 import { validarTransicaoCotacao, respostasEstaoPendentes } from "../Services/cotacao-state.service.js";
 import { calcularStatusEntrega } from "../Services/delivery.service.js";
 import { notificarUsuario, tentarNovamenteNotificacao } from "../Services/notification.service.js";
-import { calcularRankingFornecedores, agruparGastosPorObraMes, agruparGastosPorCategoria, calcularEstatisticasPreco } from "../Services/reports.service.js";
+import { calcularEstatisticasPreco } from "../Services/reports.service.js";
 
 const router = Router();
 const whatsapp = new WhatsAppProvider();
@@ -639,7 +639,6 @@ router.post("/compras/aprovar", permitir("ADMINISTRADOR", "ADMINISTRADOR_SISTEMA
         return { fornecedorId: fornecedor.id, status: "FALHOU", erro: erro.message };
       }
     }));
-    if (aprovados.length) await notificarUsuario({ usuarioId: compra.solicitanteId || req.usuario.id, evento: "COMPRA_APROVADA", entidadeTipo: "Compra", entidadeId: compra.id, chaveIdempotencia: `compra-aprovada:${compra.id}`, mensagem: `A compra #${compra.id} da obra ${compra.obra.nome} foi aprovada. Total aprovado: R$ ${Number(compra.valorAprovado || 0).toFixed(2)}.` }).catch(() => {});
     res.status(201).json({ compra, notificacoes });
   } catch (e) { fail(res, e); }
 });
@@ -845,12 +844,12 @@ router.post("/pedidos/:id/recebimentos", async (req, res) => {
 
 router.get("/relatorios/gastos", async (req, res) => {
   try {
-    const purchases = await prisma.pedidoCompra.findMany({ where: { status: { not: "CANCELADO" }, fornecedorId: req.query.fornecedorId ? Number(req.query.fornecedorId) : undefined, itens: req.query.produtoId ? { some: { selecao: { oferta: { produtoId: Number(req.query.produtoId) } } } } : req.query.categoriaId ? { some: { selecao: { oferta: { produto: { categoriaId: Number(req.query.categoriaId) } } } } } : undefined, compra: { ...obraScope(req.usuario), ...(isAdminUser(req.usuario) && req.query.obraId ? { obraId: Number(req.query.obraId) } : {}), dataCriacao: req.query.de || req.query.ate ? { gte: req.query.de ? new Date(req.query.de) : undefined, lte: req.query.ate ? new Date(`${req.query.ate}T23:59:59.999`) : undefined } : undefined } }, include: { fornecedor: true, compra: { include: { obra: true } }, itens: { include: { selecao: { include: { oferta: { include: { produto: { include: { categoria: true } } } } } } } } } });
-    const linhas = purchases.flatMap(p => p.itens.map(i => ({ obra: p.compra.obra.nome, fornecedor: p.fornecedor.nome, produto: i.selecao.oferta.produto.nome, categoria: i.selecao.oferta.produto.categoria?.nome || "Sem categoria", quantidade: Number(i.quantidade), valorUnitario: Number(i.valorUnitario), total: Number(i.quantidade) * Number(i.valorUnitario), data: p.compra.dataCriacao.toISOString() })));
-    const chave = ["fornecedor", "produto", "categoria"].includes(req.query.agruparPor) ? req.query.agruparPor : "obra";
-    const resumo = Object.entries(Object.groupBy(linhas, x => x[chave])).map(([nome, ls]) => ({ nome, total: ls.reduce((s, x) => s + x.total, 0), quantidade: ls.reduce((s, x) => s + x.quantidade, 0) }));
+    const linhas = await carregarLinhasGastos(req.usuario, req.query);
+    const chave = ({ fornecedor: "fornecedor", produto: "produto", aplicacao: "aplicacao", obra: "obra" })[req.query.agruparPor] || "obra";
+    const resumo = resumirGastos(linhas, chave);
     if (req.query.formato === "csv") {
-      const csv = ["obra,fornecedor,produto,quantidade,valorUnitario,total,data", ...linhas.map(x => [x.obra,x.fornecedor,x.produto,x.quantidade,x.valorUnitario,x.total,x.data].map(v => `"${String(v).replaceAll('"','""')}"`).join(","))].join("\r\n");
+      const fields = ["compraId", "obra", "fornecedor", "produto", "aplicacao", "quantidade", "unidade", "valorUnitario", "freteAlocado", "total", "data"];
+      const csv = [fields.join(","), ...linhas.map(row => fields.map(key => `"${String(row[key] ?? "").replaceAll('"', '""')}"`).join(","))].join("\r\n");
       res.setHeader("Content-Type", "text/csv; charset=utf-8"); res.setHeader("Content-Disposition", "attachment; filename=relatorio-gastos.csv"); return res.send(`\ufeff${csv}`);
     }
     if (req.query.formato === "pdf") {
@@ -858,33 +857,90 @@ router.get("/relatorios/gastos", async (req, res) => {
       res.setHeader("Content-Disposition", "attachment; filename=relatorio-gastos.pdf");
       const pdf = new PDFDocument({ margin: 40, size: "A4", layout: "landscape" });
       pdf.pipe(res); pdf.fontSize(18).text("Relatório de gastos", { align: "center" });
-      pdf.moveDown().fontSize(9).text(`Filtros: obra=${req.query.obraId || "todas"}; período=${req.query.de || "início"} até ${req.query.ate || "hoje"}; agrupamento=${chave}`);
-      pdf.moveDown().fontSize(10).text("Obra | Fornecedor | Produto | Quantidade | Unitário | Total | Data");
+      pdf.moveDown().fontSize(9).text(`Obra: ${req.query.obraId || "todas"} · Período: ${req.query.de || "início"} até ${req.query.ate || "hoje"}`);
+      pdf.moveDown().fontSize(9).text("Obra | Fornecedor | Produto | Aplicação | Quantidade | Unitário | Frete alocado | Total | Data");
       for (const x of linhas) {
         if (pdf.y > 520) pdf.addPage();
-        pdf.fontSize(8).text(`${x.obra} | ${x.fornecedor} | ${x.produto} | ${x.quantidade} | R$ ${x.valorUnitario.toFixed(2)} | R$ ${x.total.toFixed(2)} | ${x.data.slice(0,10)}`);
+        pdf.fontSize(7).text(`${x.obra} | ${x.fornecedor} | ${x.produto} | ${x.aplicacao} | ${x.quantidade} ${x.unidade} | R$ ${x.valorUnitario.toFixed(2)} | R$ ${x.freteAlocado.toFixed(2)} | R$ ${x.total.toFixed(2)} | ${x.data.slice(0,10)}`);
       }
       pdf.end(); return;
     }
-    res.json({ filtros: req.query, resumo, linhas });
+    res.json({ filtros: req.query, chave, resumo, linhas, total: linhas.reduce((sum, row) => sum + row.total, 0) });
   } catch (e) { fail(res, e); }
 });
 
+async function carregarLinhasGastos(usuario, query, periodo = {}) {
+  const de = periodo.de ?? query.de;
+  const ate = periodo.ate ?? query.ate;
+  const orders = await prisma.pedidoCompra.findMany({
+    where: {
+      status: { not: "CANCELADO" },
+      fornecedorId: query.fornecedorId ? Number(query.fornecedorId) : undefined,
+      compra: {
+        ...obraScope(usuario),
+        ...(query.obraId ? { obraId: isAdminUser(usuario) || Number(query.obraId) === Number(usuario.obraId) ? Number(query.obraId) : -1 } : {}),
+        status: { not: "CANCELADA" },
+        dataCriacao: de || ate ? { gte: de ? new Date(de) : undefined, lte: ate ? new Date(`${ate}T23:59:59.999`) : undefined } : undefined,
+      },
+    },
+    include: { fornecedor: true, compra: { include: { obra: true } }, itens: { include: { selecao: { include: { oferta: { include: { produto: true, itemSolicitado: { include: { aplicacao: true } }, resposta: true } } } } } } },
+    orderBy: { compra: { dataCriacao: "asc" } },
+  });
+  const applicationIds = new Set(String(query.aplicacaoIds || "").split(",").filter(Boolean).map(Number));
+  const linhas = [];
+  for (const pedido of orders) {
+    const selected = pedido.itens.map(item => {
+      const selection = item.selecao;
+      const oferta = selection.oferta;
+      const app = oferta.itemSolicitado?.aplicacao;
+      return {
+        compraId: pedido.compraId, obraId: pedido.compra.obraId, obra: pedido.compra.obra.nome,
+        fornecedorId: pedido.fornecedorId, fornecedor: pedido.fornecedor.nome,
+        produtoId: oferta.produto.id, produto: oferta.produto.nome, unidade: oferta.produto.unidade,
+        aplicacaoId: app?.id ?? null, aplicacao: app?.nome || "Sem aplicação",
+        quantidade: Number(item.quantidade), valorUnitario: Number(item.valorUnitario),
+        subtotal: Number(item.quantidade) * Number(item.valorUnitario),
+        frete: Number(oferta.resposta.frete || 0), data: pedido.compra.dataCriacao.toISOString(), mes: pedido.compra.dataCriacao.toISOString().slice(0, 7),
+      };
+    });
+    const subtotal = selected.reduce((sum, row) => sum + row.subtotal, 0);
+    for (const row of selected) {
+      row.freteAlocado = subtotal ? row.frete * row.subtotal / subtotal : row.frete / Math.max(selected.length, 1);
+      row.total = row.subtotal + row.freteAlocado;
+      if ((!query.produtoId || row.produtoId === Number(query.produtoId)) && (!applicationIds.size || applicationIds.has(row.aplicacaoId))) linhas.push(row);
+    }
+  }
+  return linhas;
+}
+
+function resumirGastos(linhas, chave, labelKey = chave) {
+  const groups = Map.groupBy(linhas, row => row[chave] ?? (labelKey === "aplicacao" ? "Sem aplicação" : ""));
+  return [...groups].map(([id, rows]) => ({ id, nome: rows[0][labelKey] || "Sem aplicação", total: rows.reduce((sum, row) => sum + row.total, 0), compras: new Set(rows.map(row => row.compraId)).size, produtos: new Set(rows.map(row => row.produtoId)).size })).sort((a, b) => b.total - a.total);
+}
+
 router.get("/relatorios/gerencial", async (req, res) => {
   try {
-    const pedidos = await prisma.pedidoCompra.findMany({ where: {
-      status: { not: "CANCELADO" },
-      ...(req.query.fornecedorId ? { fornecedorId: Number(req.query.fornecedorId) } : {}),
-      compra: { ...obraScope(req.usuario), ...(isAdminUser(req.usuario) && req.query.obraId ? { obraId: Number(req.query.obraId) } : {}), dataCriacao: req.query.de || req.query.ate ? { gte: req.query.de ? new Date(req.query.de) : undefined, lte: req.query.ate ? new Date(`${req.query.ate}T23:59:59.999`) : undefined } : undefined },
-      itens: req.query.produtoId ? { some: { selecao: { oferta: { produtoId: Number(req.query.produtoId) } } } } : req.query.categoriaId ? { some: { selecao: { oferta: { produto: { categoriaId: Number(req.query.categoriaId) } } } } } : undefined,
-    }, include: { fornecedor: true, compra: { include: { obra: true } }, itens: { include: { selecao: { include: { oferta: { include: { produto: { include: { categoria: true } } } } } } } } } });
-    const linhas = pedidos.flatMap(pedido => pedido.itens.map(item => {
-      const produto = item.selecao.oferta.produto;
-      const data = pedido.compra.dataCriacao;
-      return { compraId: pedido.compraId, obraId: pedido.compra.obraId, obra: pedido.compra.obra.nome, fornecedorId: pedido.fornecedorId, fornecedor: pedido.fornecedor.nome, produtoId: produto.id, produto: produto.nome, especificacao: produto.especificacao || produto.referencia || produto.nome, unidade: produto.unidade, categoriaId: produto.categoriaId, categoria: produto.categoria?.nome || "Sem categoria", quantidade: Number(item.quantidade), valorUnitario: Number(item.valorUnitario), total: Number(item.quantidade) * Number(item.valorUnitario), data: data.toISOString(), mes: data.toISOString().slice(0, 7) };
-    }));
-    const gastosPorCategoria = agruparGastosPorCategoria(linhas);
-    res.json({ filtros: req.query, fornecedores: calcularRankingFornecedores(linhas), gastosPorObraMes: agruparGastosPorObraMes(linhas), gastosPorCategoria, linhas });
+    const linhas = await carregarLinhasGastos(req.usuario, req.query);
+    const total = linhas.reduce((sum, row) => sum + row.total, 0);
+    const gastosPorObra = resumirGastos(linhas, "obraId", "obra").map(row => ({ obra: row.nome, obraId: row.id, total: row.total, quantidadeCompras: row.compras, participacaoPercentual: total ? row.total / total * 100 : 0 }));
+    const gastosPorAplicacao = resumirGastos(linhas, "aplicacaoId", "aplicacao").map(row => ({ aplicacao: row.nome, aplicacaoId: row.id || null, total: row.total, quantidadeCompras: row.compras, participacaoPercentual: total ? row.total / total * 100 : 0 }));
+    const fornecedores = resumirGastos(linhas, "fornecedorId", "fornecedor").map(row => ({ fornecedor: row.nome, fornecedorId: row.id, totalComprado: row.total, quantidadeCompras: row.compras, variedadeProdutos: row.produtos, participacaoPercentual: total ? row.total / total * 100 : 0 }));
+    const months = Map.groupBy(linhas, row => row.mes);
+    const gastosPorMes = [...months].map(([mes, rows]) => ({ mes, total: rows.reduce((sum, row) => sum + row.total, 0) })).sort((a, b) => a.mes.localeCompare(b.mes));
+    let comparacao = null;
+    if (req.query.de && req.query.ate) {
+      const start = new Date(req.query.de); const end = new Date(`${req.query.ate}T23:59:59.999`);
+      const days = Math.max(1, Math.ceil((end - start + 1) / 86400000));
+      const prevEnd = new Date(start.getTime() - 1); const prevStart = new Date(prevEnd.getTime() - days * 86400000 + 1);
+      const previous = await carregarLinhasGastos(req.usuario, req.query, { de: prevStart.toISOString().slice(0, 10), ate: prevEnd.toISOString().slice(0, 10) });
+      const totalAnterior = previous.reduce((sum, row) => sum + row.total, 0);
+      if (previous.length) {
+        const anterior = { total: totalAnterior, quantidadeCompras: new Set(previous.map(row => row.compraId)).size, quantidadeFornecedores: new Set(previous.map(row => row.fornecedorId)).size, quantidadeProdutos: new Set(previous.map(row => row.produtoId)).size, quantidadeObras: new Set(previous.map(row => row.obraId)).size };
+        const atual = { total, quantidadeCompras: new Set(linhas.map(row => row.compraId)).size, quantidadeFornecedores: new Set(linhas.map(row => row.fornecedorId)).size, quantidadeProdutos: new Set(linhas.map(row => row.produtoId)).size, quantidadeObras: new Set(linhas.map(row => row.obraId)).size };
+        comparacao = { anterior, variacoes: Object.fromEntries(Object.entries(atual).map(([key, value]) => [key, anterior[key] ? (value - anterior[key]) / anterior[key] * 100 : null])) };
+      }
+    }
+    res.json({ filtros: req.query, indicadores: { total, quantidadeCompras: new Set(linhas.map(row => row.compraId)).size, quantidadeFornecedores: new Set(linhas.map(row => row.fornecedorId)).size, quantidadeProdutos: new Set(linhas.map(row => row.produtoId)).size, quantidadeObras: new Set(linhas.map(row => row.obraId)).size, quantidadeUnidades: linhas.reduce((sum, row) => sum + row.quantidade, 0), comparacao }, gastosPorObra, gastosPorAplicacao, gastosPorMes, fornecedores, linhas });
   } catch (e) { fail(res, e); }
 });
 
@@ -892,15 +948,16 @@ router.get("/relatorios/precos", async (req, res) => {
   try {
     const produtoId = Number(req.query.produtoId);
     if (!Number.isInteger(produtoId) || produtoId <= 0) throw new Error("Informe um produto para comparar precos.");
+    const applicationIds = String(req.query.aplicacaoIds || "").split(",").filter(Boolean).map(Number);
     const produto = await prisma.produto.findUniqueOrThrow({ where: { id: produtoId } });
     const ofertas = await prisma.cotacaoRespostaItem.findMany({ where: {
       produtoId,
       indisponivel: false,
-      itemSolicitado: { is: { produtoId } },
+      itemSolicitado: { is: { produtoId, ...(applicationIds.length ? { aplicacaoId: { in: applicationIds } } : {}) } },
       resposta: { is: { status: { in: ["ENCAMINHADA", "APROVADA", "ENCERRADA"] }, fornecedorId: req.query.fornecedorId ? Number(req.query.fornecedorId) : undefined, cotacao: { is: { ...obraScope(req.usuario), ...(isAdminUser(req.usuario) && req.query.obraId ? { obraId: Number(req.query.obraId) } : {}), dataCriacao: req.query.de || req.query.ate ? { gte: req.query.de ? new Date(req.query.de) : undefined, lte: req.query.ate ? new Date(`${req.query.ate}T23:59:59.999`) : undefined } : undefined } } } },
     }, include: { itemSolicitado: true, resposta: { include: { fornecedor: true, cotacao: { include: { obra: true } } } } } });
-    const linhas = ofertas.filter(oferta => oferta.itemSolicitado?.unidade === produto.unidade && (!req.query.categoriaId || produto.categoriaId === Number(req.query.categoriaId))).map(oferta => ({ produtoId, produto: produto.nome, especificacao: produto.especificacao || produto.referencia || produto.nome, unidade: oferta.itemSolicitado.unidade, quantidadeSolicitada: Number(oferta.itemSolicitado.quantidadeSolicitada), quantidade: Number(oferta.quantidadeOfertada), valorUnitario: Number(oferta.valorUnitario), total: Number(oferta.quantidadeOfertada) * Number(oferta.valorUnitario), fornecedorId: oferta.resposta.fornecedorId, fornecedor: oferta.resposta.fornecedor.nome, cotacaoId: oferta.resposta.cotacaoEnvioId, obra: oferta.resposta.cotacao.obra.nome, data: oferta.resposta.dataResposta || oferta.resposta.cotacao.dataCriacao, frete: oferta.resposta.frete == null ? null : Number(oferta.resposta.frete), condicaoPagamento: oferta.resposta.condicaoPagamento }));
-    linhas.sort((a, b) => a.valorUnitario - b.valorUnitario);
+    const linhas = ofertas.filter(oferta => oferta.itemSolicitado?.unidade === produto.unidade).map(oferta => ({ produtoId, produto: produto.nome, especificacao: produto.especificacao || produto.referencia || produto.nome, unidade: oferta.itemSolicitado.unidade, quantidadeSolicitada: Number(oferta.itemSolicitado.quantidadeSolicitada), quantidade: Number(oferta.quantidadeOfertada), valorUnitario: Number(oferta.valorUnitario), total: Number(oferta.quantidadeOfertada) * Number(oferta.valorUnitario), fornecedorId: oferta.resposta.fornecedorId, fornecedor: oferta.resposta.fornecedor.nome, cotacaoId: oferta.resposta.cotacaoEnvioId, obra: oferta.resposta.cotacao.obra.nome, data: oferta.resposta.dataResposta || oferta.resposta.cotacao.dataCriacao, frete: oferta.resposta.frete == null ? null : Number(oferta.resposta.frete), condicaoPagamento: oferta.resposta.condicaoPagamento }));
+    linhas.sort((a, b) => req.query.modo === "historico" ? new Date(a.data) - new Date(b.data) : a.valorUnitario - b.valorUnitario);
     const estatisticas = calcularEstatisticasPreco(linhas);
     res.json({ produto: { id: produto.id, nome: produto.nome, especificacao: produto.especificacao || produto.referencia || produto.nome, unidade: produto.unidade }, linhas, estatisticas: estatisticas[0] || null });
   } catch (e) { fail(res, e); }
@@ -908,8 +965,9 @@ router.get("/relatorios/precos", async (req, res) => {
 
 router.get("/relatorios/cotacoes", async (req, res) => {
   try {
-    const cotacoes = await prisma.cotacaoEnvio.findMany({ where: { ...obraScope(req.usuario), ...(isAdminUser(req.usuario) && req.query.obraId ? { obraId: Number(req.query.obraId) } : {}), dataCriacao: req.query.de || req.query.ate ? { gte: req.query.de ? new Date(req.query.de) : undefined, lte: req.query.ate ? new Date(req.query.ate) : undefined } : undefined, itens: req.query.produtoId ? { some: { produtoId: Number(req.query.produtoId) } } : undefined }, include: { obra: true, itens: { include: { produto: true, ofertas: { include: { resposta: { include: { fornecedor: true } } } } } }, respostas: { include: { itens: true } } }, orderBy: { dataCriacao: "desc" }, take: Math.min(Number(req.query.limite) || 500, 1000) });
-    const rows = cotacoes.flatMap(c => c.itens.flatMap(i => i.ofertas.map(o => ({ cotacaoId: c.id, obra: c.obra.nome, produto: i.produto.nome, unidade: i.unidade, solicitada: Number(i.quantidadeSolicitada), fornecedor: o.resposta.fornecedor.nome, ofertada: Number(o.quantidadeOfertada), valorUnitario: Number(o.valorUnitario), total: Number(o.quantidadeOfertada) * Number(o.valorUnitario), disponibilidade: o.indisponivel ? "indisponivel" : "disponivel" }))));
+    const applicationIds = String(req.query.aplicacaoIds || "").split(",").filter(Boolean).map(Number);
+    const cotacoes = await prisma.cotacaoEnvio.findMany({ where: { ...obraScope(req.usuario), ...(req.query.obraId ? { obraId: isAdminUser(req.usuario) || Number(req.query.obraId) === Number(req.usuario.obraId) ? Number(req.query.obraId) : -1 } : {}), fornecedores: req.query.fornecedorId ? { some: { fornecedorId: Number(req.query.fornecedorId) } } : undefined, dataCriacao: req.query.de || req.query.ate ? { gte: req.query.de ? new Date(req.query.de) : undefined, lte: req.query.ate ? new Date(`${req.query.ate}T23:59:59.999`) : undefined } : undefined, itens: req.query.produtoId || applicationIds.length ? { some: { produtoId: req.query.produtoId ? Number(req.query.produtoId) : undefined, aplicacaoId: applicationIds.length ? { in: applicationIds } : undefined } } : undefined }, include: { obra: true, itens: { include: { produto: true, aplicacao: true, ofertas: { include: { resposta: { include: { fornecedor: true } } } } } }, respostas: { include: { itens: true } } }, orderBy: { dataCriacao: "desc" }, take: Math.min(Number(req.query.limite) || 500, 1000) });
+    const rows = cotacoes.flatMap(c => c.itens.filter(i => (!req.query.produtoId || i.produtoId === Number(req.query.produtoId)) && (!applicationIds.length || applicationIds.includes(i.aplicacaoId))).flatMap(i => i.ofertas.filter(o => !req.query.fornecedorId || o.resposta.fornecedorId === Number(req.query.fornecedorId)).map(o => ({ cotacaoId: c.id, obra: c.obra.nome, produto: i.produto.nome, unidade: i.unidade, aplicacao: i.aplicacao?.nome || "Sem aplicação", solicitada: Number(i.quantidadeSolicitada), fornecedorId: o.resposta.fornecedorId, fornecedor: o.resposta.fornecedor.nome, ofertada: Number(o.quantidadeOfertada), valorUnitario: Number(o.valorUnitario), total: Number(o.quantidadeOfertada) * Number(o.valorUnitario), disponibilidade: o.indisponivel ? "Indisponível" : "Disponível" }))));
     if (req.query.formato === "csv") {
       const csv = ["cotacaoId,obra,produto,unidade,solicitada,fornecedor,ofertada,valorUnitario,total,disponibilidade", ...rows.map(x => Object.values(x).map(v => `"${String(v).replaceAll('"','""')}"`).join(","))].join("\r\n");
       res.setHeader("Content-Type", "text/csv; charset=utf-8"); res.setHeader("Content-Disposition", "attachment; filename=relatorio-cotacoes.csv"); return res.send(`\ufeff${csv}`);

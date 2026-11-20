@@ -7,7 +7,7 @@ import {
   X,
 } from 'lucide-react';
 
-import { Login, Overview, Quotes, Responses, Approvals, Purchases, Catalog, Reports, Settings, WhatsApp, QuoteWizard, ResponseModal, PurchaseModal, QuoteManagementModal, UsersAdmin } from './pages/index.js';
+import { Login, Overview, Quotes, Responses, Approvals, Purchases, Catalog, Reports, Settings, WhatsApp, QuoteWizard, ResponseModal, PurchaseModal, QuoteManagementModal, UsersAdmin, Help } from './pages/index.js';
 import { statusNames } from './utils/formatters.js';
 
 
@@ -70,7 +70,7 @@ function App() {
     { title: 'WORKSPACE', items: [{ id: 'overview', label: 'Visão geral', icon: LayoutDashboard }, { id: 'quotes', label: 'Cotações', icon: ClipboardList, count: data.quotes.filter(q => !['CONCLUIDA', 'ENCERRADA', 'CANCELADA'].includes(q.status)).length }, { id: 'responses', label: 'Respostas', icon: MessageCircle }, { id: 'approval', label: 'Aprovações', icon: BadgeCheck }, { id: 'purchases', label: 'Pedidos e compras', icon: ShoppingCart }] },
   ];
   const settingsPages = { settings: 'Configurações', catalog: 'Cadastros', whatsapp: 'WhatsApp', reports: 'Relatórios', users: 'Usuários' };
-  const activeLabel = nav.flatMap(n => n.items).find(i => i.id === page)?.label || settingsPages[page] || 'Visão geral';
+  const activeLabel = nav.flatMap(n => n.items).find(i => i.id === page)?.label || settingsPages[page] || (page === 'help' ? 'Central de ajuda' : 'Vis\u00e3o geral');
   const settingsActive = Object.hasOwn(settingsPages, page);
   const contentProps = { api, data, refresh, go, notify, perform, setModal, responseQuoteId, setResponseQuoteId };
   const openResponseQuote = (quote) => { setResponseQuoteId(quote.id); setPage('responses'); setMobileNav(false); setModal(null); };
@@ -78,7 +78,7 @@ function App() {
   return <div className="app-shell">
     <aside className={`sidebar ${mobileNav ? 'sidebar-open' : ''}`}><button className="icon-button mobile-close sidebar-mobile-close" onClick={() => setMobileNav(false)} aria-label="Fechar menu"><X size={18}/></button>
       <nav>{nav.map(group => <div className="nav-group" key={group.title}><span className="nav-caption">{group.title}</span>{group.items.map(item => <button key={item.id} className={`nav-link ${page === item.id ? 'active' : ''}`} onClick={() => go(item.id)}><item.icon size={18}/><span>{item.label}</span>{item.count > 0 && <em>{item.count}</em>}</button>)}</div>)}</nav>
-      <div className="sidebar-bottom"><button className={`nav-link ${settingsActive ? 'active' : ''}`} onClick={() => go('settings')}><Settings2 size={18}/><span>Configurações</span></button><div className="help-card"><div className="help-icon"><CircleHelp size={17}/></div><b>Precisa de ajuda?</b><p>Veja como funciona o fluxo de compras.</p><button onClick={() => notify('O fluxo começa criando uma cotação e selecionando uma obra.')}>Acessar central <ArrowRight size={14}/></button></div><div className="profile"><div className="avatar">{user.nome?.slice(0, 1).toUpperCase()}</div><div className="profile-info"><b>{user.nome}</b><small>{(typeof user.perfil === 'string' ? user.perfil : user.perfil?.nome || '').replaceAll('_', ' ')}</small></div><button className="icon-button" title="Sair" onClick={signOut}><LogOut size={16}/></button></div></div>
+      <div className="sidebar-bottom"><button className={`nav-link ${settingsActive ? 'active' : ''}`} onClick={() => go('settings')}><Settings2 size={18}/><span>Configurações</span></button><div className="help-card"><div className="help-icon"><CircleHelp size={17}/></div><b>Precisa de ajuda?</b><p>Veja como funciona o fluxo de compras.</p><button onClick={() => go('help')}>Acessar central <ArrowRight size={14}/></button></div><div className="profile"><div className="avatar">{user.nome?.slice(0, 1).toUpperCase()}</div><div className="profile-info"><b>{user.nome}</b><small>{(typeof user.perfil === 'string' ? user.perfil : user.perfil?.nome || '').replaceAll('_', ' ')}</small></div><button className="icon-button" title="Sair" onClick={signOut}><LogOut size={16}/></button></div></div>
     </aside>
     <main className="main-area">
       <header className="topbar"><div className="topbar-left"><button className="icon-button mobile-menu" onClick={() => setMobileNav(true)}><Menu size={19}/></button><div className="breadcrumbs"><span>Workspace</span><ChevronRight size={14}/><b>{activeLabel}</b></div></div><div className="topbar-right"><div className="search-shortcut"><Search size={15}/><span>Buscar</span><kbd>⌘ K</kbd></div><button className="icon-button notification" onClick={() => notify('Você está em dia. Nenhuma notificação nova.')}><Bell size={18}/><i></i></button><div className="topbar-divider"></div><div className="top-user"><div className="avatar small-avatar">{user.nome?.slice(0, 1).toUpperCase()}</div><ChevronDown size={14}/></div></div></header>
@@ -93,6 +93,7 @@ function App() {
         {page === 'settings' && <Settings user={user} go={go} />}
         {page === 'whatsapp' && <WhatsApp {...contentProps} />}
         {page === 'users' && <UsersAdmin {...contentProps} user={user} />}
+        {page === 'help' && <Help {...contentProps} user={user} />}
       </div>
       <footer className="footer"><span>ORBE · Gestão de compras</span><span>Fluxos claros. Compras sob controle.</span></footer>
     </main>
