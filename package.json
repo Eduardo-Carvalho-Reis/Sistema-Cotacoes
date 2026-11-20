@@ -4,10 +4,15 @@
   "description": "",
   "main": "server.js",
   "scripts": {
-    "test": "echo \"Error: no test specified\" && exit 1",
-    "dev" : "tsx watch src/Backend/server.js",
-    "start": "tsx src/Backend/server.js"
-    
+    "test": "node --test",
+    "dev": "concurrently -k -n BACKEND,FRONTEND \"npm run dev:backend\" \"npm run dev:frontend\"",
+    "dev:backend": "tsx watch src/Backend/server.js",
+    "dev:frontend": "npm run dev --prefix src/Frontend",
+    "start": "tsx src/Backend/server.js",
+    "db:generate": "prisma generate --schema src/Backend/prisma/schema.prisma",
+    "db:migrate": "prisma migrate deploy --config src/Backend/prisma.config.ts",
+    "db:status": "prisma migrate status --config src/Backend/prisma.config.ts",
+    "db:seed": "tsx src/Backend/prisma/seed.js"
   },
   "repository": {
     "type": "git",
@@ -22,13 +27,18 @@
   },
   "homepage": "https://github.com/Eduardo-Carvalho-Reis/Sistema-Cotacoes#readme",
   "dependencies": {
-    "@prisma/adapter-mariadb": "^7.9.1",
+    "@prisma/adapter-pg": "7.9.1",
     "@prisma/client": "^7.9.1",
+    "bcryptjs": "^3.0.3",
     "dotenv": "^17.4.2",
-    "express": "^5.2.1"
+    "express": "^5.2.1",
+    "jsonwebtoken": "^9.0.3",
+    "pdfkit": "^0.20.2",
+    "pg": "^8.23.1"
   },
   "devDependencies": {
     "@types/node": "^26.2.0",
+    "concurrently": "^10.0.7",
     "prisma": "^7.9.1",
     "tsx": "^4.23.12",
     "typescript": "^7.0.2"

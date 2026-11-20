@@ -4,86 +4,523 @@ generator client {
 }
 
 datasource db {
-  provider = "mysql"
+  provider = "postgresql"
+}
+
+model Perfil {
+  id        Int       @id @default(autoincrement())
+  nome      String    @unique
+  descricao String?
+  usuarios  Usuario[]
+}
+
+model Usuario {
+  id           Int                 @id @default(autoincrement())
+  nome         String
+  cpf          String?             @unique
+  telefone     String?
+  email        String              @unique
+  senhaHash    String
+  perfilId     Int
+  obraId       Int?
+  ativo        Boolean             @default(true)
+  criadoEm     DateTime            @default(now())
+  perfil       Perfil              @relation(fields: [perfilId], references: [id], onDelete: Restrict)
+  obra         Obra?               @relation(fields: [obraId], references: [id], onDelete: Restrict)
+  cotacoes     CotacaoEnvio[]
+  comprasSolicitadas Compra[] @relation("CompraSolicitante")
+  comprasAprovadas Compra[] @relation("CompraAprovador")
+  comprasCanceladas Compra[] @relation("CompraCanceladaPor")
+  respostas    CotacaoResposta[]
+  aprovacoes   SelecaoCompraItem[]
+  recebimentos RecebimentoItem[]
+  historicos   HistoricoStatus[]
+  whatsappDestinatarios WhatsAppDestinatario[]
+  auditorias   Auditoria[]
+  cotacoesCanceladas CotacaoEnvio[] @relation("CotacaoCanceladaPor")
+  enviosResposta HistoricoEnvioResposta[]
+  enviosCotacao HistoricoEnvioMensagem[]
+  historicosNotaFiscal HistoricoNotaFiscal[]
+  sessaoWhatsApp WhatsAppSessao?
+  notificacoes Notificacao[]
+}
+
+model WhatsAppDestinatario {
+  id            Int      @id @default(autoincrement())
+  usuarioId     Int
+  nome          String
+  tipo          String
+  identificador String
+  ativo         Boolean  @default(true)
+  criadoEm      DateTime @default(now())
+  atualizadoEm  DateTime @updatedAt
+  usuario       Usuario  @relation(fields: [usuarioId], references: [id], onDelete: Cascade)
+
+  @@unique([usuarioId, identificador])
+  @@index([usuarioId, ativo, tipo])
+}
+
+model WhatsAppSessao {
+  id                 Int      @id @default(autoincrement())
+  usuarioId          Int      @unique
+  nomeSessao         String   @unique
+  tokenCriptografado String?
+  status             String   @default("DESCONECTADO")
+  telefoneConectado  String?
+  atualizadoStatusEm DateTime?
+  criadoEm           DateTime @default(now())
+  atualizadoEm       DateTime @updatedAt
+  usuario            Usuario  @relation(fields: [usuarioId], references: [id], onDelete: Cascade)
+}
+
+model Obra {
+  id       Int            @id @default(autoincrement())
+  nome     String
+  endereco String?
+  ativo    Boolean        @default(true)
+  cotacoes CotacaoEnvio[]
+  compras  Compra[]
+  usuarios Usuario[]
+}
+
+model CategoriaProduto {
+  id        Int       @id @default(autoincrement())
+  nome      String    @unique
+  descricao String?
+  ativo     Boolean   @default(true)
+  produtos  Produto[]
+}
+
+model Equipamento {
+  id                 Int         @id @default(autoincrement())
+  nome               String
+  chassi             String?
+  potenciaCapacidade String?
+  ano                Int?
+  placa              String?
+  ativo              Boolean     @default(true)
+  aplicacoes         Aplicacao[]
+}
+
+model Aplicacao {
+  id            Int                @id @default(autoincrement())
+  nome          String
+  tipo          TipoAplicacao
+  equipamentoId Int?
+  ativo         Boolean            @default(true)
+  equipamento   Equipamento?       @relation(fields: [equipamentoId], references: [id], onDelete: SetNull)
+  itens         CotacaoEnvioItem[]
+}
+
+enum TipoAplicacao {
+  EQUIPAMENTO
+  AREA
+}
+
+model Fornecedor {
+  id            Int                      @id @default(autoincrement())
+  nome          String
+  cnpj          String?                  @unique
+  endereco      String?
+  telefone      String?
+  email         String?
+  ativo         Boolean                  @default(true)
+  cotacoes      CotacaoResposta[]
+  participacoes CotacaoEnvioFornecedor[]
+  produtos      ProdutoFornecedor[]
+  pedidos       PedidoCompra[]
+
+  @@index([ativo])
 }
 
 model Produto {
-  id           Int           @id @default(autoincrement())
-  nome         String
-  referencia   String        @unique
-  nomePopular  String?
-  unidade      String        @default("UN") // UN, KG, CX, L, etc.
-  precoAtual   Decimal?      @db.Decimal(10, 2)
-  ativo        Boolean       @default(true)
-
-  itensCotacao ItemCotacao[]
-
-  @@index([ativo])
-}
-
-
-model Fornecedor {
-  id       Int       @id @default(autoincrement())
-  nome     String
-  cnpj     String?   @unique
-  telefone String?   // usado pra montar o link do WhatsApp (wa.me)
-  ativo    Boolean   @default(true)
-
-  cotacoes Cotacao[]
+  id               Int                   @id @default(autoincrement())
+  nome             String
+  referencia       String?               @unique
+  nomePopular      String?
+  unidade          String                @default("UN")
+  precoAtual       Decimal?              @db.Decimal(12, 2)
+  especificacao    String?
+  categoriaId      Int?
+  ativo            Boolean               @default(true)
+  categoria        CategoriaProduto?     @relation(fields: [categoriaId], references: [id], onDelete: SetNull)
+  itensSolicitados CotacaoEnvioItem[]
+  itensResposta    CotacaoRespostaItem[]
+  fornecedores     ProdutoFornecedor[]
 
   @@index([ativo])
 }
 
-// Agrupa várias Cotacao 
-// pedido de compra, permitindo comparar fornecedores entre si.
-model RodadaCotacao {
-  id        Int       @id @default(autoincrement())
-  titulo    String    
-  criadoEm  DateTime  @default(now())
+model ProdutoFornecedor {
+  id              Int        @id @default(autoincrement())
+  produtoId       Int
+  fornecedorId    Int
+  precoReferencia Decimal?   @db.Decimal(12, 2)
+  ativo           Boolean    @default(true)
+  produto         Produto    @relation(fields: [produtoId], references: [id], onDelete: Restrict)
+  fornecedor      Fornecedor @relation(fields: [fornecedorId], references: [id], onDelete: Restrict)
 
-  cotacoes  Cotacao[]
+  @@unique([produtoId, fornecedorId])
 }
 
-
-model Cotacao {
-  id           Int            @id @default(autoincrement())
-  rodadaId     Int
-  fornecedorId Int
-
-  status       StatusCotacao  @default(ABERTA)
-  dataResposta DateTime?      // quando o fornecedor respondeu com preços
+model CotacaoEnvio {
+  id           Int                      @id @default(autoincrement())
+  obraId       Int
+  usuarioId    Int
+  dataCriacao  DateTime                 @default(now())
   observacao   String?
-
-  rodada       RodadaCotacao  @relation(fields: [rodadaId], references: [id])
-  fornecedor   Fornecedor     @relation(fields: [fornecedorId], references: [id])
-  itens        ItemCotacao[]
-
-  @@unique([rodadaId, fornecedorId]) 
+  status       StatusCotacaoEnvio       @default(RASCUNHO)
+  cancelamentoMotivo String?
+  canceladaEm  DateTime?
+  canceladaPorId Int?
+  obra         Obra                     @relation(fields: [obraId], references: [id], onDelete: Restrict)
+  usuario      Usuario                  @relation(fields: [usuarioId], references: [id], onDelete: Restrict)
+  canceladaPor Usuario?                 @relation("CotacaoCanceladaPor", fields: [canceladaPorId], references: [id], onDelete: SetNull)
+  itens        CotacaoEnvioItem[]
+  fornecedores CotacaoEnvioFornecedor[]
+  respostas    CotacaoResposta[]
+  compras      Compra[]
+  historicos   HistoricoStatus[]
+  auditorias   Auditoria[]
 }
 
-
-model ItemCotacao {
-  id         Int      @id @default(autoincrement())
-  cotacaoId  Int
-  produtoId  Int
-
-  quantidade Decimal  @db.Decimal(10, 3) // decimal p/ permitir KG, L fracionados
-  preco      Decimal? @db.Decimal(10, 2) // null = ainda não respondido pelo fornecedor
-  observacao String?
-
-  cotacao    Cotacao  @relation(fields: [cotacaoId], references: [id])
-  produto    Produto  @relation(fields: [produtoId], references: [id])
-
-  @@unique([cotacaoId, produtoId])
-  @@index([produtoId])
-}
-
-enum StatusCotacao {
-  ABERTA       // criada, aguardando envio ou resposta
-  ENVIADA      // mensagem já mandada pro fornecedor
-  RESPONDIDA   // fornecedor já passou os preços
-  FINALIZADA   // cotação encerrada / decisão tomada
+enum StatusCotacaoEnvio {
+  RASCUNHO
+  ENVIADA
+  EM_ANDAMENTO
+  CONCLUIDA
+  ENCERRADA
   CANCELADA
 }
 
+model CotacaoEnvioItem {
+  id                   Int                   @id @default(autoincrement())
+  cotacaoEnvioId       Int
+  produtoId            Int
+  quantidadeSolicitada Decimal               @db.Decimal(12, 3)
+  unidade              String
+  aplicacaoId          Int?
+  cotacao              CotacaoEnvio          @relation(fields: [cotacaoEnvioId], references: [id], onDelete: Restrict)
+  produto              Produto               @relation(fields: [produtoId], references: [id], onDelete: Restrict)
+  aplicacao            Aplicacao?            @relation(fields: [aplicacaoId], references: [id], onDelete: SetNull)
+  ofertas              CotacaoRespostaItem[]
 
+  @@index([produtoId])
+}
+
+model CotacaoEnvioFornecedor {
+  id                   Int                      @id @default(autoincrement())
+  cotacaoEnvioId       Int
+  fornecedorId         Int
+  statusEnvio          StatusEnvio              @default(PENDENTE)
+  dataEnvio            DateTime?
+  identificadorExterno String?
+  telefone             String?
+  erro                 String?
+  cotacao              CotacaoEnvio             @relation(fields: [cotacaoEnvioId], references: [id], onDelete: Restrict)
+  fornecedor           Fornecedor               @relation(fields: [fornecedorId], references: [id], onDelete: Restrict)
+  historicos           HistoricoEnvioMensagem[]
+
+  @@unique([cotacaoEnvioId, fornecedorId])
+}
+
+enum StatusEnvio {
+  PENDENTE
+  ENVIADO
+  FALHOU
+}
+
+model CotacaoResposta {
+  id                     Int                   @id @default(autoincrement())
+  cotacaoEnvioId         Int
+  fornecedorId           Int
+  usuarioPreenchimentoId Int?
+  dataResposta           DateTime?
+  observacao             String?
+  frete                  Decimal?              @db.Decimal(12, 2)
+  condicaoPagamento      String?
+  status                 StatusResposta        @default(PREENCHIMENTO)
+  cotacao                CotacaoEnvio          @relation(fields: [cotacaoEnvioId], references: [id], onDelete: Restrict)
+  fornecedor             Fornecedor            @relation(fields: [fornecedorId], references: [id], onDelete: Restrict)
+  usuario                Usuario?              @relation(fields: [usuarioPreenchimentoId], references: [id], onDelete: SetNull)
+  itens                  CotacaoRespostaItem[]
+  historicoEnvios        HistoricoEnvioResposta[]
+
+  @@unique([cotacaoEnvioId, fornecedorId])
+}
+
+enum StatusResposta {
+  PREENCHIMENTO
+  ENCAMINHADA
+  APROVADA
+  ENCERRADA
+  CANCELADA
+}
+
+model CotacaoRespostaItem {
+  id                 Int                 @id @default(autoincrement())
+  cotacaoRespostaId  Int
+  cotacaoEnvioItemId Int?
+  produtoId          Int
+  quantidadeOfertada Decimal             @db.Decimal(12, 3)
+  valorUnitario      Decimal             @db.Decimal(12, 2)
+  indisponivel       Boolean             @default(false)
+  adicional          Boolean             @default(false)
+  status             StatusOferta        @default(PENDENTE)
+  observacao         String?
+  resposta           CotacaoResposta     @relation(fields: [cotacaoRespostaId], references: [id], onDelete: Restrict)
+  itemSolicitado     CotacaoEnvioItem?   @relation(fields: [cotacaoEnvioItemId], references: [id], onDelete: Restrict)
+  produto            Produto             @relation(fields: [produtoId], references: [id], onDelete: Restrict)
+  selecoes           SelecaoCompraItem[]
+
+  @@index([produtoId])
+}
+
+enum StatusOferta {
+  PENDENTE
+  APROVADA
+  REJEITADA
+  ENCERRADA
+}
+
+model Compra {
+  id             Int                 @id @default(autoincrement())
+  obraId         Int
+  cotacaoEnvioId Int                 @unique
+  dataCriacao    DateTime            @default(now())
+  status         StatusCompra        @default(APROVACAO)
+  observacaoCancelamento String?
+  solicitanteId Int?
+  aprovadorId Int?
+  canceladaPorId Int?
+  aprovadaEm DateTime?
+  canceladaEm DateTime?
+  valorAprovado Decimal? @db.Decimal(14, 2)
+  obra           Obra                @relation(fields: [obraId], references: [id], onDelete: Restrict)
+  cotacao        CotacaoEnvio        @relation(fields: [cotacaoEnvioId], references: [id], onDelete: Restrict)
+  solicitante Usuario? @relation("CompraSolicitante", fields: [solicitanteId], references: [id], onDelete: SetNull)
+  aprovador Usuario? @relation("CompraAprovador", fields: [aprovadorId], references: [id], onDelete: SetNull)
+  canceladaPor Usuario? @relation("CompraCanceladaPor", fields: [canceladaPorId], references: [id], onDelete: SetNull)
+  selecoes       SelecaoCompraItem[]
+  pedidos        PedidoCompra[]
+  historicos     HistoricoStatus[]
+  auditorias     Auditoria[]
+  notasFiscais NotaFiscal[]
+  historicosNotaFiscal HistoricoNotaFiscal[]
+}
+
+enum StatusCompra {
+  APROVACAO
+  PEDIDOS_ABERTOS
+  EM_ANDAMENTO
+  CONCLUIDA
+  CANCELADA
+}
+
+model SelecaoCompraItem {
+  id                    Int                 @id @default(autoincrement())
+  compraId              Int
+  cotacaoRespostaItemId Int
+  quantidadeAprovada    Decimal             @db.Decimal(12, 3)
+  valorUnitarioAprovado Decimal             @db.Decimal(12, 2)
+  aprovadorId           Int
+  dataAprovacao         DateTime            @default(now())
+  status                StatusSelecao
+  compra                Compra              @relation(fields: [compraId], references: [id], onDelete: Restrict)
+  oferta                CotacaoRespostaItem @relation(fields: [cotacaoRespostaItemId], references: [id], onDelete: Restrict)
+  aprovador             Usuario             @relation(fields: [aprovadorId], references: [id], onDelete: Restrict)
+  pedidoItem            PedidoCompraItem?
+}
+
+enum StatusSelecao {
+  APROVADA
+  REJEITADA
+}
+
+model PedidoCompra {
+  id           Int                @id @default(autoincrement())
+  compraId     Int
+  fornecedorId Int
+  dataPedido   DateTime?
+  status       StatusPedido       @default(AGUARDANDO_CONFIRMACAO)
+  compra       Compra             @relation(fields: [compraId], references: [id], onDelete: Restrict)
+  fornecedor   Fornecedor         @relation(fields: [fornecedorId], references: [id], onDelete: Restrict)
+  itens        PedidoCompraItem[]
+  notasFiscais NotaFiscal[]
+  historicos   HistoricoStatus[]
+  auditorias   Auditoria[]
+
+  @@unique([compraId, fornecedorId])
+}
+
+enum StatusPedido {
+  AGUARDANDO_CONFIRMACAO
+  CONFIRMADO
+  PARCIALMENTE_RECEBIDO
+  RECEBIDO
+  CANCELADO
+}
+
+enum StatusEntrega {
+  PENDENTE
+  PARCIALMENTE_ENTREGUE
+  ENTREGUE
+  ATRASADA
+  CANCELADA
+}
+
+model PedidoCompraItem {
+  id                  Int               @id @default(autoincrement())
+  pedidoCompraId      Int
+  selecaoCompraItemId Int               @unique
+  quantidade          Decimal           @db.Decimal(12, 3)
+  valorUnitario       Decimal           @db.Decimal(12, 2)
+  dataPrevistaEntrega DateTime?
+  dataEntregaEfetiva DateTime?
+  statusEntrega StatusEntrega @default(PENDENTE)
+  observacaoEntrega String?
+  pedido              PedidoCompra      @relation(fields: [pedidoCompraId], references: [id], onDelete: Restrict)
+  selecao             SelecaoCompraItem @relation(fields: [selecaoCompraItemId], references: [id], onDelete: Restrict)
+  recebimentos        RecebimentoItem[]
+}
+
+model NotaFiscal {
+  id                Int          @id @default(autoincrement())
+  pedidoCompraId    Int
+  compraId          Int
+  numero            String
+  dataEmissao       DateTime
+  valorTotal        Decimal      @db.Decimal(12, 2)
+  dataRegistro      DateTime     @default(now())
+  ativa             Boolean      @default(true)
+  status            String       @default("REGISTRADA")
+  pedido            PedidoCompra @relation(fields: [pedidoCompraId], references: [id], onDelete: Restrict)
+  compra            Compra       @relation(fields: [compraId], references: [id], onDelete: Restrict)
+  historicos        HistoricoNotaFiscal[]
+
+  @@index([pedidoCompraId])
+  @@index([compraId, ativa])
+}
+
+model HistoricoNotaFiscal {
+  id Int @id @default(autoincrement())
+  notaFiscalId Int
+  compraId Int
+  usuarioId Int?
+  numero String
+  dataEmissao DateTime
+  valorTotal Decimal @db.Decimal(12, 2)
+  dataRegistro DateTime
+  substituidaEm DateTime @default(now())
+  notaFiscal NotaFiscal @relation(fields: [notaFiscalId], references: [id], onDelete: Restrict)
+  compra Compra @relation(fields: [compraId], references: [id], onDelete: Restrict)
+  usuario Usuario? @relation(fields: [usuarioId], references: [id], onDelete: SetNull)
+  @@index([compraId, substituidaEm])
+}
+
+model RecebimentoItem {
+  id                 Int              @id @default(autoincrement())
+  pedidoCompraItemId Int
+  quantidadeRecebida Decimal          @db.Decimal(12, 3)
+  dataRecebimento    DateTime         @default(now())
+  usuarioId          Int
+  observacao         String?
+  item               PedidoCompraItem @relation(fields: [pedidoCompraItemId], references: [id], onDelete: Restrict)
+  usuario            Usuario          @relation(fields: [usuarioId], references: [id], onDelete: Restrict)
+}
+
+model HistoricoStatus {
+  id             Int           @id @default(autoincrement())
+  entidadeTipo   String
+  entidadeId     Int
+  statusAnterior String?
+  statusNovo     String
+  usuarioId      Int?
+  dataHora       DateTime      @default(now())
+  observacao     String?
+  usuario        Usuario?      @relation(fields: [usuarioId], references: [id], onDelete: SetNull)
+  cotacaoEnvioId Int?
+  cotacaoEnvio   CotacaoEnvio? @relation(fields: [cotacaoEnvioId], references: [id], onDelete: SetNull)
+  compraId       Int?
+  compra         Compra?       @relation(fields: [compraId], references: [id], onDelete: SetNull)
+  pedidoCompraId Int?
+  pedidoCompra   PedidoCompra? @relation(fields: [pedidoCompraId], references: [id], onDelete: SetNull)
+
+  @@index([entidadeTipo, entidadeId])
+}
+
+model Auditoria {
+  id           BigInt   @id @default(autoincrement())
+  usuarioId    Int?
+  operacao     String
+  entidadeTipo String
+  entidadeId   String
+  valoresAntes Json?
+  valoresNovos Json?
+  detalhes     Json?
+  dataHora     DateTime @default(now())
+  usuario      Usuario? @relation(fields: [usuarioId], references: [id], onDelete: SetNull)
+  cotacaoEnvioId Int?
+  cotacaoEnvio CotacaoEnvio? @relation(fields: [cotacaoEnvioId], references: [id], onDelete: SetNull)
+  compraId     Int?
+  compra       Compra? @relation(fields: [compraId], references: [id], onDelete: SetNull)
+  pedidoCompraId Int?
+  pedidoCompra PedidoCompra? @relation(fields: [pedidoCompraId], references: [id], onDelete: SetNull)
+
+  @@index([entidadeTipo, entidadeId, dataHora])
+  @@index([usuarioId, dataHora])
+}
+
+model HistoricoEnvioMensagem {
+  id                       Int                    @id @default(autoincrement())
+  cotacaoEnvioFornecedorId Int
+  telefone                 String
+  mensagem                 String
+  dataHora                 DateTime               @default(now())
+  status                   StatusEnvio
+  erro                     String?
+  identificadorExterno     String?
+  usuarioId                Int?
+  envio                    CotacaoEnvioFornecedor @relation(fields: [cotacaoEnvioFornecedorId], references: [id], onDelete: Restrict)
+  usuario                  Usuario? @relation(fields: [usuarioId], references: [id], onDelete: SetNull)
+}
+
+model HistoricoEnvioResposta {
+  id                    Int             @id @default(autoincrement())
+  cotacaoRespostaId     Int
+  usuarioId             Int
+  destinatarioId        Int?
+  destinatarioNome      String
+  telefone              String
+  mensagem              String
+  dataHora              DateTime        @default(now())
+  status                StatusEnvio
+  erro                  String?
+  identificadorExterno  String?
+  resposta              CotacaoResposta @relation(fields: [cotacaoRespostaId], references: [id], onDelete: Restrict)
+  usuario               Usuario         @relation(fields: [usuarioId], references: [id], onDelete: Restrict)
+  @@index([cotacaoRespostaId, dataHora])
+}
+
+model Notificacao {
+  id                BigInt   @id @default(autoincrement())
+  usuarioId         Int
+  evento            String
+  entidadeTipo      String
+  entidadeId        String
+  destinatarioNome  String?
+  telefone          String?
+  mensagem          String
+  chaveIdempotencia String   @unique
+  status            String   @default("PENDENTE")
+  tentativas        Int      @default(0)
+  erro              String?
+  proximaTentativa  DateTime?
+  criadoEm          DateTime @default(now())
+  enviadoEm         DateTime?
+  usuario           Usuario @relation(fields: [usuarioId], references: [id], onDelete: Restrict)
+
+  @@index([usuarioId, criadoEm])
+  @@index([status, proximaTentativa])
+  @@index([entidadeTipo, entidadeId])
+}

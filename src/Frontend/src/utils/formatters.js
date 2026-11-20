@@ -1,0 +1,6 @@
+const money = (n) => new Intl.NumberFormat('pt-BR', { style: 'currency', currency: 'BRL' }).format(Number(n || 0));
+const date = (value) => value ? new Intl.DateTimeFormat('pt-BR').format(new Date(value)) : '—';
+const statusNames = { RASCUNHO: 'Rascunho', ENVIADA: 'Enviada', EM_ANALISE: 'Em análise', EM_ANDAMENTO: 'Em andamento', APROVACAO: 'Em aprovação', PEDIDOS_ABERTOS: 'Pedidos abertos', CONCLUIDA: 'Concluída', ENCERRADA: 'Encerrada', CANCELADA: 'Cancelada', PREENCHIMENTO: 'Em preenchimento', ENCAMINHADA: 'Encaminhada', CONFIRMADO: 'Confirmado', PARCIALMENTE_RECEBIDO: 'Recebimento parcial', RECEBIDO: 'Recebido', PENDENTE: 'Pendente', APROVADA: 'Aprovada', REJEITADA: 'Rejeitada', INDISPONIVEL: 'Indisponível' };
+const statusClass = (s = '') => ({ RASCUNHO: 'neutral', PENDENTE: 'neutral', PREENCHIMENTO: 'neutral', ENVIADA: 'blue', ENCAMINHADA: 'blue', EM_ANALISE: 'blue', APROVACAO: 'amber', PEDIDOS_ABERTOS: 'amber', CONFIRMADO: 'blue', PARCIALMENTE_RECEBIDO: 'amber', RECEBIDO: 'green', APROVADA: 'green', CONCLUIDA: 'green', ENCERRADA: 'neutral', REJEITADA: 'red', CANCELADA: 'red', INDISPONIVEL: 'red', EM_ANDAMENTO: 'blue' }[s] || 'neutral');
+
+export { money, date, statusNames, statusClass };

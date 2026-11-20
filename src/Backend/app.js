@@ -1,9 +1,11 @@
 import express from 'express';
 import routerFornecedos from './Routes/fornecedor.routes.js';
 import routerProdutos from './Routes/produto.routes.js';
-import routerItemCotacao from './Routes/itemcotacao.route.js';
-import routerCotacao from './Routes/cotacao.routes.js';
-import routerRodadaCotacao from './Routes/rodadacotacao.routes.js';
+import authRoutes from './Routes/auth.routes.js';
+import catalogRoutes from './Routes/catalog.routes.js';
+import workflowRoutes from './Routes/workflow.routes.js';
+import whatsappRoutes from './Routes/whatsapp.routes.js';
+import { autenticar } from './middleware/auth.js';
 
 const app = express();
 
@@ -11,17 +13,18 @@ app.use(express.urlencoded({ extended: true }));
 // configuração para processar dados JSON
 app.use(express.json());
 
+app.get('/health', (_req, res) => res.json({ status: 'ok' }));
+app.use('/auth', authRoutes);
+app.use(autenticar);
+
 
 // rotas de produto
 app.use('/produto',routerProdutos);
 // rotas de fornecedor
 app.use('/fornecedor',routerFornecedos);
-// rotas de itemCotacao
-app.use('/itemcotacao',routerItemCotacao);
-// rotas de cotacao
-app.use('/cotacao',routerCotacao);
-// rotas de rodadacotacao
-app.use('/rodadacotacao',routerRodadaCotacao)
+app.use('/api/catalogos', catalogRoutes);
+app.use('/api/whatsapp', whatsappRoutes);
+app.use('/api', workflowRoutes);
 
 
 
